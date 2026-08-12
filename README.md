@@ -26,3 +26,7 @@ The tracked code execution blocks are marked implemented. Remaining work is in-g
 - [Architecture](ARCHITECTURE.md)
 - [Code index](CODE_INDEX.md)
 - [Code graph](CODE_GRAPH.md)
+
+## License
+
+Licensed under the [MIT License](LICENSE). Bundled third-party components remain under their own notices.
