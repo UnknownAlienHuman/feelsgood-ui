@@ -2475,9 +2475,9 @@ renderer = { kind="ICON", kind2="BAR" }
 Важно: блок ниже с архивными статус-пометками считаю устаревшим до in-game проверки. Ниже - факт-чек по коду аддона + референсы из `_Info` и `Blizzard_UI_12.0.1.65867`.
 
 Проверено локально:
-- `C:/Users/kleym/OneDrive/Documents/WoWDevAddons/_Addons/FeelsGoodUI`
-- `C:/Users/kleym/OneDrive/Documents/WoWDevAddons/_Info`
-- `C:/Users/kleym/OneDrive/Documents/WoWDevAddons/C:\Tools\WoW_Dev_Tools\wow-ui-source/Blizzard_UI_12.0.1.65867`
+- current `FeelsGoodUI` addon tree;
+- the workspace `_Info` knowledge base;
+- Blizzard UI source snapshot for build `12.0.1.65867`.
 
 ### 0) Критический блокер: ADDON_ACTION_BLOCKED на SetPropagateKeyboardInput
 Проверка: в `core/Movers.lua` `EnsureKeyListener()` все еще вызывает `f:SetPropagateKeyboardInput(...)` (несколько раз в `OnKeyDown`). Это прямо совпадает с текущим BugGrabber логом.
