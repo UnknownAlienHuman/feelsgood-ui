@@ -1,0 +1,81 @@
+## Interface: 120001, 120005
+## Title: FeelsGoodUI
+## Notes: Minimalist oUF-based unitframes + custom secure action bars.
+## Author: Neomorph
+## Version: 0.0.40
+## SavedVariables: FeelsGoodUIDB
+## RequiredDeps: oUF
+
+# Libs (vendored, minimal)
+libs/LibStub/LibStub.lua
+libs/CallbackHandler-1.0/CallbackHandler-1.0.lua
+libs/LibDataBroker-1.1/LibDataBroker-1.1.lua
+libs/LibDBIcon-1.0/LibDBIcon-1.0.lua
+libs/LibSharedMedia-3.0/LibSharedMedia-3.0.lua
+
+# Core
+core/Bootstrap.lua
+core/Log.lua
+core/Locale.lua
+core/Errors.lua
+core/Diagnostics.lua
+core/Safety.lua
+core/Secret.lua
+core/Utils.lua
+core/Animate.lua
+core/Schema.lua
+core/DB.lua
+core/Settings.lua
+core/Apply.lua
+core/Theme.lua
+core/Media.lua
+core/Perf.lua
+core/Events.lua
+core/Lifecycle.lua
+core/FeatureRegistry.lua
+core/MoversShared.lua
+core/MoversSnapGrid.lua
+core/MoversInspector.lua
+core/MoversEditor.lua
+core/Movers.lua
+core/MinimapIconActions.lua
+core/MinimapIcon.lua
+core/OptionsShared.lua
+core/OptionsSharedHelpers.lua
+core/OptionsFieldBuilders.lua
+core/Options.lua
+core/OptionsPanelGeneral.lua
+core/OptionsPanelEditMode.lua
+core/OptionsPanelActionBars.lua
+core/OptionsPanelCompanion.lua
+core/OptionsPanelCenterBars.lua
+core/OptionsPanelUnitFrames.lua
+core/QA.lua
+core/ProfileTransfer.lua
+core/Commands.lua
+core/App.lua
+
+# Modules
+modules/UnitFramesText.lua
+modules/UnitFramesTarget.lua
+modules/UnitFramesRender.lua
+modules/UnitFramesPolicy.lua
+modules/UnitFramesRuntime.lua
+modules/UnitFrames.lua
+modules/CenterBarsRuntime.lua
+modules/CenterBarsRender.lua
+modules/CenterBars.lua
+modules/ActionBarsEditMode.lua
+modules/ActionBarsBlizzardShell.lua
+modules/ActionBarsState.lua
+modules/ActionBarsVisuals.lua
+modules/ActionBarsRuntime.lua
+modules/ActionBars.lua
+modules/CompanionShared.lua
+modules/CompanionPetBar.lua
+modules/CompanionMicroBags.lua
+modules/CompanionRuntime.lua
+modules/Companion.lua
+modules/ExperienceBar.lua
+
+FeelsGoodUI.lua
