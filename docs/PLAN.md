@@ -1,6 +1,6 @@
 # FeelsGoodUI Plan (high-level)
 
-Goal: minimal, fast ElvUI-base replacement (action frames + player/target + castbar + settings), using Blizzard systems and Secret Value-safe handling.
+Goal: minimal, fast full-UI replacement (action frames + player/target + castbar + settings), using Blizzard systems and Secret Value-safe handling.
 
 1) Core: scheduler (staggered init), module Construct/Configure pattern, DB (profile vs private), diagnostics/perf
 2) Action frames: robust Blizzard art/endcap hider + button skinning + layout/state/visibility + hotkey formatting
