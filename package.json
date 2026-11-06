@@ -1,4 +1,8 @@
 {
+  "private": true,
+  "scripts": {
+    "test": "node check_lua.js"
+  },
   "dependencies": {
     "luaparse": "^0.3.1"
   }
