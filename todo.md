@@ -4,7 +4,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 
 ## Retail 12.1.5 implementation status
 
-- [x] Target Interface `120105` and release `0.0.46`.
+- [x] Target Interface `120105` and release `0.0.47`.
 - [x] Gate Secret/Restricted Values before Lua inspection, conversion, comparison, or formatting.
 - [x] Integrate restricted Unit Frame and Center Bar handling into the canonical render/target owners; remove late method overrides and duplicate producer calls.
 - [x] Keep opaque power/text on exact native sinks where available; otherwise render an explicit unavailable state.
@@ -16,12 +16,16 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 - [x] Define one shared debounce contract: an existing keyed timer is a successful coalesced request, callers never inspect `Safety._timers`, and teardown cancellation invalidates generations before restore.
 - [x] Propagate explicit apply-handler failures through FeatureRegistry/App/Apply, roll back the entire settings batch, restore already-applied runtime owners, and centrally defer UnitFrames transactions during combat.
 - [x] Journal scalar writes, panel undo, and panel reset in one operation order; failed/deferred batches repair exact undo artifacts, preserve newer owners, and restore every runtime key that had already committed.
+- [x] Make lifecycle enable/disable result-aware and reentrancy-safe; failed attach/apply never publishes an enabled state, independent features continue loading, and disabled-at-login UnitFrames/CenterBars can acquire their runtime owners later.
 
 ## Required in-game validation
 
 - [ ] Record `GetBuildInfo()` and confirm Interface `120105` on the tested client.
 - [ ] Fresh login and `/reload` complete with zero repeating Lua errors.
 - [ ] `/fgui qa` and `/fgui report` complete without legacy-field or schema failures.
+- [ ] Start with UnitFrames and CenterBars disabled, log in, then enable them without `/reload`; frames initialize once, observers/events attach once, and live updates begin immediately.
+- [ ] Disable and re-enable UnitFrames/CenterBars repeatedly; no duplicate event owner, stale unit watcher, duplicate frame, or false lifecycle state remains.
+- [ ] Simulate a feature attach/apply failure; the module remains disabled, any new attachment is cleaned up, later feature families still enable, and the exact failure is logged.
 - [ ] Player/target/focus/targettarget frames handle ordinary and restricted health/name/classification values without formatting errors or opaque readback.
 - [ ] Target aura filtering handles ordinary and inaccessible aura-source payloads without indexing denied tables or fields.
 - [ ] Center bars handle ordinary and restricted power/rune values without duplicate producer calls, error loops, retained opaque samples, or stale text.
