@@ -135,16 +135,30 @@ end
 
 local function CleanupFailedAttach(module, state, spec)
     local key = ResolveDetachKey(module, spec)
-    if not key then
-        state.attached = false
-        state.enabled = false
-        return true
+    local cleanupOK = true
+    local cleanupDetail = nil
+
+    if key then
+        cleanupOK, cleanupDetail = Invoke(module, key, "attach cleanup")
+        cleanupOK = cleanupOK or module._detached == true
     end
 
-    local ok = Invoke(module, key, "attach cleanup")
-    state.attached = not (ok or module._detached == true)
+    -- Attach itself never completed, so this lifecycle owner must not advertise
+    -- an attached state even when best-effort cleanup reports a failure.
+    state.attached = false
     state.enabled = false
-    return not state.attached
+    state.cleanupError = cleanupOK and nil or cleanupDetail or "Attach cleanup returned false"
+    return cleanupOK, state.cleanupError
+end
+
+local function RollbackNewAttachment(module, state, spec)
+    local detached, detail = DetachModule(module, state, spec)
+    if detached then
+        state.cleanupError = nil
+        return true
+    end
+    state.cleanupError = detail or "Apply rollback detach returned false"
+    return false, state.cleanupError
 end
 
 local function InjectControlMethods(name, module)
@@ -231,7 +245,10 @@ function Lifecycle:Enable(name)
 
         local attached, attachDetail = Invoke(module, attachKey, "attach")
         if not attached then
-            CleanupFailedAttach(module, state, spec)
+            local cleaned, cleanupDetail = CleanupFailedAttach(module, state, spec)
+            if not cleaned and cleanupDetail then
+                attachDetail = tostring(attachDetail or "Attach returned false") .. "; cleanup: " .. tostring(cleanupDetail)
+            end
             return FinishTransition(state, false, attachDetail)
         end
         state.attached = true
@@ -239,17 +256,24 @@ function Lifecycle:Enable(name)
 
     local applyKey = ResolveApplyKey(module, spec)
     if applyKey == nil then
+        local detail = "Missing lifecycle apply method"
         if not attachedBefore then
-            CleanupFailedAttach(module, state, spec)
+            local cleaned, cleanupDetail = RollbackNewAttachment(module, state, spec)
+            if not cleaned and cleanupDetail then
+                detail = detail .. "; cleanup: " .. tostring(cleanupDetail)
+            end
         end
-        return FinishTransition(state, false, "Missing lifecycle apply method")
+        return FinishTransition(state, false, detail)
     end
 
     if applyKey ~= false then
         local applied, applyDetail = Invoke(module, applyKey, "apply")
         if not applied then
             if not attachedBefore then
-                CleanupFailedAttach(module, state, spec)
+                local cleaned, cleanupDetail = RollbackNewAttachment(module, state, spec)
+                if not cleaned and cleanupDetail then
+                    applyDetail = tostring(applyDetail or "Apply returned false") .. "; cleanup: " .. tostring(cleanupDetail)
+                end
             end
             return FinishTransition(state, false, applyDetail)
         end
