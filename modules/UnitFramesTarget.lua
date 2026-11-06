@@ -67,22 +67,36 @@ local function IsTargetLikeUnit(unit)
     return false
 end
 
-local function SafeSetText(fs, v)
-    local fn = Ctx().SafeSetText
-    if type(fn) == "function" then
-        return fn(fs, v)
-    end
-    if fs then
-        fs:SetText(v or "")
-    end
-end
-
 local function IsSecretValue(v)
     local fn = Ctx().IsSecretValue
     if type(fn) == "function" then
         return fn(v) == true
     end
+    if Secret and Secret.CanAccess then
+        return Secret.CanAccess(v) ~= true
+    end
     return false
+end
+
+local function CanInspect(v)
+    return not IsSecretValue(v)
+end
+
+local function SafeSetText(fs, v)
+    local fn = Ctx().SafeSetText
+    if type(fn) == "function" then
+        return fn(fs, v)
+    end
+    if not fs then
+        return
+    end
+    if not CanInspect(v) then
+        fs:SetText(v)
+    elseif v == nil then
+        fs:SetText("")
+    else
+        fs:SetText(v)
+    end
 end
 
 local function ResolveRGBA(tbl, fallbackR, fallbackG, fallbackB, fallbackA)
@@ -163,7 +177,9 @@ local function ResolveTargetHeaderTextColor(frame)
     local health = frame and frame.Health
     if health and health.GetStatusBarColor then
         local ok, r, g, b, a = pcall(health.GetStatusBarColor, health)
-        if ok and type(r) == "number" and type(g) == "number" and type(b) == "number" then
+        if ok
+            and CanInspect(r) and CanInspect(g) and CanInspect(b) and CanInspect(a)
+            and type(r) == "number" and type(g) == "number" and type(b) == "number" then
             return r, g, b, (type(a) == "number" and a or 1)
         end
     end
@@ -220,6 +236,15 @@ function Target.LayoutTargetHeader(frame)
     frame.TargetHeader:SetPoint("BOTTOMRIGHT", anchor, "TOPRIGHT", 0, 6)
 end
 
+local function ApplyFallbackHealthColor(frame, cfg)
+    local r = cfg.fallbackR or 0.12
+    local g = cfg.fallbackG or 0.12
+    local b = cfg.fallbackB or 0.12
+    local a = cfg.fallbackA or 1
+    SetStatusBarColorSafe(frame.Health, r, g, b, a)
+    Target.ApplyTargetHeaderTextColor(frame)
+end
+
 function Target.UpdateUnitHealthColor(frame, unit)
     if not frame or not frame.Health then return end
 
@@ -231,9 +256,18 @@ function Target.UpdateUnitHealthColor(frame, unit)
     local cfg = cache.healthColor or EMPTY
 
     local isPlayer = UnitIsPlayer(unit)
-    if (not IsSecretValue(isPlayer)) and isPlayer and cfg.useClassColorForEnemyPlayers ~= false then
+    if not CanInspect(isPlayer) then
+        ApplyFallbackHealthColor(frame, cfg)
+        return
+    end
+
+    if isPlayer == true and cfg.useClassColorForEnemyPlayers ~= false then
         local _, class = UnitClass(unit)
-        if class and (not IsSecretValue(class)) and _G.RAID_CLASS_COLORS then
+        if not CanInspect(class) then
+            ApplyFallbackHealthColor(frame, cfg)
+            return
+        end
+        if class ~= nil and _G.RAID_CLASS_COLORS then
             local color = _G.RAID_CLASS_COLORS[class]
             if color then
                 SetStatusBarColorSafe(frame.Health, color.r, color.g, color.b, 1)
@@ -245,20 +279,21 @@ function Target.UpdateUnitHealthColor(frame, unit)
 
     if cfg.useReactionColorForNPC ~= false then
         local reaction = UnitReaction(unit, "player")
-        if (not IsSecretValue(reaction)) and reaction and _G.FACTION_BAR_COLORS and _G.FACTION_BAR_COLORS[reaction] then
-            local color = _G.FACTION_BAR_COLORS[reaction]
-            SetStatusBarColorSafe(frame.Health, color.r, color.g, color.b, 1)
-            Target.ApplyTargetHeaderTextColor(frame)
+        if not CanInspect(reaction) then
+            ApplyFallbackHealthColor(frame, cfg)
             return
+        end
+        if reaction ~= nil and _G.FACTION_BAR_COLORS then
+            local color = _G.FACTION_BAR_COLORS[reaction]
+            if color then
+                SetStatusBarColorSafe(frame.Health, color.r, color.g, color.b, 1)
+                Target.ApplyTargetHeaderTextColor(frame)
+                return
+            end
         end
     end
 
-    local r = cfg.fallbackR or 0.12
-    local g = cfg.fallbackG or 0.12
-    local b = cfg.fallbackB or 0.12
-    local a = cfg.fallbackA or 1
-    SetStatusBarColorSafe(frame.Health, r, g, b, a)
-    Target.ApplyTargetHeaderTextColor(frame)
+    ApplyFallbackHealthColor(frame, cfg)
 end
 
 function Target.UpdateTargetHealthColor(frame)
@@ -357,25 +392,15 @@ function Target.ApplyTargetAuraModeToFrame(frame)
     end
 end
 
-local function ClassificationTag(unit)
-    local classification = _G.UnitClassification and UnitClassification(unit)
-    if not classification or IsSecretValue(classification) then
+local function ClassificationTag(classification)
+    if not CanInspect(classification) or classification == nil or classification == "normal" then
         return ""
     end
-
-    if Secret and type(Secret.CanAccessValue) == "function" then
-        local okAccess, canAccess = pcall(Secret.CanAccessValue, classification)
-        if okAccess and canAccess == false then
-            return ""
-        end
-    end
-
-    if classification == "normal" then return "" end
     if classification == "elite" then return "+" end
     if classification == "rare" then return "R" end
     if classification == "rareelite" then return "R+" end
     if classification == "worldboss" then return "B" end
-    return tostring(classification)
+    return type(classification) == "string" and classification or ""
 end
 
 local function BuildTargetInfoText(unit)
@@ -392,23 +417,17 @@ local function BuildTargetInfoText(unit)
         end
     end
 
-    local tag = ClassificationTag(unit)
-    if tag ~= "" then
-        out[#out + 1] = tag
+    if _G.UnitClassification then
+        local tag = ClassificationTag(UnitClassification(unit))
+        if tag ~= "" then
+            out[#out + 1] = tag
+        end
     end
 
     if _G.UnitClass then
         local className = UnitClass(unit)
-        if className and (not IsSecretValue(className)) then
-            if Secret and type(Secret.CanAccessValue) == "function" then
-                local okAccess, canAccess = pcall(Secret.CanAccessValue, className)
-                if okAccess and canAccess == false then
-                    className = nil
-                end
-            end
-            if className then
-                out[#out + 1] = tostring(className)
-            end
+        if CanInspect(className) and className ~= nil then
+            out[#out + 1] = tostring(className)
         end
     end
 
@@ -476,18 +495,19 @@ function Target.UpdateTargetInfoFrame(frame)
     local cache = GetCache()
     local cfg = type(cache.targetInfo) == "table" and cache.targetInfo or EMPTY
     local hasTarget = false
+
     if _G.UnitExists then
         local okExists, exists = pcall(_G.UnitExists, unit)
-        hasTarget = okExists and (exists == true)
+        if okExists and CanInspect(exists) then
+            hasTarget = (exists == true)
+        end
     end
 
     local showHeader = (cfg.enabled == true) and hasTarget
-    if frame.TargetHeader then
-        if showHeader then
-            frame.TargetHeader:Show()
-        else
-            frame.TargetHeader:Hide()
-        end
+    if showHeader then
+        frame.TargetHeader:Show()
+    else
+        frame.TargetHeader:Hide()
     end
 
     if not showHeader then
@@ -515,7 +535,7 @@ function Target.UpdateTargetInfoFrame(frame)
 
     if frame.TargetInfoText then
         if cfg.showInfo ~= false then
-            SafeSetText(frame.TargetInfoText, BuildTargetInfoText(unit))
+            frame.TargetInfoText:SetText(BuildTargetInfoText(unit))
             frame.TargetInfoText:Show()
         else
             frame.TargetInfoText:SetText("")
