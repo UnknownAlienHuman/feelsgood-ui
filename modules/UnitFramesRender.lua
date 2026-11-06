@@ -269,7 +269,7 @@ local function HideLowHPGlow(frame)
     end
 end
 
-local function UpdatePlayerLowHPGlow(frame, unit, value, maxv)
+local function UpdatePlayerLowHPGlow(frame, unit, value, maxv, directPercent)
     if not frame or unit ~= "player" or not frame.LowHPGlow then
         return
     end
@@ -282,8 +282,7 @@ local function UpdatePlayerLowHPGlow(frame, unit, value, maxv)
     end
 
     local percent = nil
-    local direct = SafeUnitHealthPercent(unit)
-    local okDirect, directNumber = U.TryNumber(direct)
+    local okDirect, directNumber = U.TryNumber(directPercent)
     if okDirect then
         percent = directNumber
     else
@@ -388,6 +387,7 @@ local function PostUpdateHealth(health, unit, cur, minOrMax, maybeMax)
         maxv = minOrMax
     end
 
+    local directPercent = SafeUnitHealthPercent(unit)
     local shorten = ShouldShortenUnit(unit, value)
     if frame.HealthValueText then
         local okValue = U.TryNumber(value)
@@ -411,13 +411,12 @@ local function PostUpdateHealth(health, unit, cur, minOrMax, maybeMax)
     end
 
     if frame.HealthPercentText then
-        local direct = SafeUnitHealthPercent(unit)
-        local okDirect, directNumber = U.TryNumber(direct)
+        local okDirect, directNumber = U.TryNumber(directPercent)
         if okDirect then
             SafeSetText(frame.HealthPercentText, FormatPercentText(directNumber))
-        elseif not CanInspect(direct) then
+        elseif not CanInspect(directPercent) then
             -- Direct one-way sink only. Do not format or read back opaque text.
-            SafeSetText(frame.HealthPercentText, direct)
+            SafeSetText(frame.HealthPercentText, directPercent)
         else
             local okCur, curNumber = U.TryNumber(value)
             local okMax, maxNumber = U.TryNumber(maxv)
@@ -438,7 +437,7 @@ local function PostUpdateHealth(health, unit, cur, minOrMax, maybeMax)
     end
 
     if unit == "player" then
-        UpdatePlayerLowHPGlow(frame, unit, value, maxv)
+        UpdatePlayerLowHPGlow(frame, unit, value, maxv, directPercent)
     else
         Render.UpdateUnitHealthColor(frame, unit)
     end
