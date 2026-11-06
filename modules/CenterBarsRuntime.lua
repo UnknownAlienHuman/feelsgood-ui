@@ -105,14 +105,7 @@ local CENTER_EVENT_HANDLERS = {
     end,
 }
 
-function Runtime:Attach(owner)
-    if not owner._inited then
-        owner:Init()
-    end
-    if not owner._inited then
-        return false
-    end
-
+local function EnsureEvents(owner)
     if owner._eventsAttached then
         return true
     end
@@ -156,6 +149,34 @@ function Runtime:Attach(owner)
     return true
 end
 
+local function DetachEvents(owner)
+    if owner._eventFrame then
+        owner._eventFrame:UnregisterAllEvents()
+        owner._eventFrame:SetScript("OnEvent", nil)
+    end
+    owner._eventsAttached = false
+end
+
+function Runtime:Attach(owner)
+    local center = GetCenterCfg()
+    if center.enabled == false then
+        DetachEvents(owner)
+        return true
+    end
+
+    if not owner._inited then
+        local initialized, detail = owner:Init()
+        if initialized == false then
+            return false, detail
+        end
+    end
+    if not owner._inited then
+        return false, "CenterBars initialization incomplete"
+    end
+
+    return EnsureEvents(owner)
+end
+
 function Runtime:Detach(owner)
     Call("StopRuneTicker", owner)
     Call("RestoreDefaultClassResources", owner)
@@ -164,19 +185,14 @@ function Runtime:Detach(owner)
         owner.frame:Hide()
     end
 
-    if not owner._eventFrame then
-        owner._eventsAttached = false
-        return false
-    end
-
-    owner._eventFrame:UnregisterAllEvents()
-    owner._eventFrame:SetScript("OnEvent", nil)
-    owner._eventsAttached = false
+    DetachEvents(owner)
     return true
 end
 
 function Runtime:Init(owner)
-    if owner._inited then return end
+    if owner._inited then
+        return true
+    end
 
     local createCenterMoverSpec = Ctx().CreateCenterMoverSpec
     local createPowerBar = Ctx().CreatePowerBar
@@ -185,13 +201,13 @@ function Runtime:Init(owner)
         or type(createPowerBar) ~= "function"
         or type(ensureSegmentPool) ~= "function" then
         Log:Warn("CenterBars runtime helpers missing; init aborted.")
-        return
+        return false, "CenterBars runtime helpers missing"
     end
 
     local center = GetCenterCfg()
     if center.enabled == false then
         Log:Info("CenterBars disabled (DB).")
-        return
+        return true
     end
     Call("RefreshThresholdConfig", owner)
 
@@ -200,32 +216,40 @@ function Runtime:Init(owner)
     local h2 = tonumber(center.powerHeight) or 14
     local gap = tonumber(center.spacing) or 6
 
-    local f = CreateFrame("Frame", "FGUI_Center", UIParent)
+    local f = owner.frame
+    if not f then
+        f = CreateFrame("Frame", "FGUI_Center", UIParent)
+        owner.frame = f
+    end
     f:SetSize(w, h1 + gap + h2)
 
-    owner.frame = f
-
-    local resource = CreateFrame("Frame", nil, f)
+    local resource = owner.resourceBar
+    if not resource then
+        resource = CreateFrame("Frame", nil, f)
+        owner.resourceBar = resource
+    end
+    resource:ClearAllPoints()
     resource:SetPoint("TOP", f, "TOP", 0, 0)
     resource:SetSize(w, h1)
 
-    owner.resourceBar = resource
-    owner.resourceSegments = {}
+    owner.resourceSegments = owner.resourceSegments or {}
 
     local maxSeg = tonumber(center.maxSegments) or 10
     if maxSeg < 6 then maxSeg = 6 end
     ensureSegmentPool(owner, maxSeg, h1)
 
-    local power = createPowerBar(f, w, h2)
+    local power = owner.powerBar
     if not power then
-        owner.frame = nil
-        owner.resourceBar = nil
-        owner.resourceSegments = nil
-        Log:Warn("CenterBars power bar helper returned nil; init aborted.")
-        return
+        power = createPowerBar(f, w, h2)
+        if not power then
+            f:Hide()
+            Log:Warn("CenterBars power bar helper returned nil; init aborted.")
+            return false, "CenterBars power bar helper returned nil"
+        end
+        owner.powerBar = power
     end
+    power:ClearAllPoints()
     power:SetPoint("TOP", resource, "BOTTOM", 0, -gap)
-    owner.powerBar = power
 
     Movers:Register("center", f, createCenterMoverSpec("Center"))
     Movers:Apply("center", f)
@@ -236,6 +260,7 @@ function Runtime:Init(owner)
     Call("UpdatePower", owner)
 
     Log:Info("CenterBars initialized.")
+    return true
 end
 
 function Runtime:ApplyConfig(owner)
@@ -245,18 +270,29 @@ function Runtime:ApplyConfig(owner)
     if center.enabled == false then
         Call("StopRuneTicker", owner)
         Call("RestoreDefaultClassResources", owner)
+        DetachEvents(owner)
         if owner.frame then
             owner.frame:Hide()
         end
-        return
+        return true
     end
 
     Call("RefreshThresholdConfig", owner)
 
     if not owner._inited then
-        owner:Init()
+        local initialized, detail = owner:Init()
+        if initialized == false then
+            return false, detail
+        end
     end
-    if not owner.frame then return end
+    if not owner.frame then
+        return false, "CenterBars frame unavailable"
+    end
+
+    local attached, attachDetail = EnsureEvents(owner)
+    if attached == false then
+        return false, attachDetail
+    end
 
     local w = tonumber(center.width) or 560
     local h1 = tonumber(center.resourceHeight) or 12
@@ -301,6 +337,7 @@ function Runtime:ApplyConfig(owner)
     owner.frame:Show()
     Call("RefreshResourceMode", owner)
     Call("UpdatePower", owner)
+    return true
 end
 
 return Runtime

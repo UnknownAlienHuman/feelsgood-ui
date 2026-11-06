@@ -123,30 +123,50 @@ local function ApplyToFrame(frame, unit, unitframesCfg, defaults, font, textCfg,
     Call("ForceUpdateHealthText", frame, unit)
 end
 
-function Runtime:Attach(owner)
-    if not owner._inited then
-        owner:Init()
-    end
-    if not owner._inited then
-        return false
-    end
-
+local function AttachObservers(owner)
     if owner._eventsAttached then
         return true
+    end
+    if not owner._inited then
+        return false, "UnitFrames observers require initialized frames"
     end
 
     if Target and Target.AttachOwner then
         Target.AttachOwner(owner)
     end
-
     owner._eventsAttached = true
     return true
 end
 
-function Runtime:Detach(owner)
+local function DetachObservers(owner)
     if Target and Target.DetachOwner then
         Target.DetachOwner(owner)
     end
+    owner._eventsAttached = false
+end
+
+function Runtime:Attach(owner)
+    local cfg = GetUnitFramesCfg()
+    if cfg.enabled == false then
+        DetachObservers(owner)
+        return true
+    end
+
+    if not owner._inited then
+        local initialized, detail = owner:Init()
+        if initialized == false then
+            return false, detail
+        end
+    end
+    if not owner._inited then
+        return false, "UnitFrames initialization incomplete"
+    end
+
+    return AttachObservers(owner)
+end
+
+function Runtime:Detach(owner)
+    DetachObservers(owner)
 
     SetUnitWatch(owner.focus, false)
     SetUnitWatch(owner.targettarget, false)
@@ -164,49 +184,70 @@ function Runtime:Detach(owner)
 
     owner._configDirty = nil
     owner._auraModeDirty = nil
-    owner._eventsAttached = false
     return true
 end
 
 function Runtime:Init(owner)
+    if owner._inited then
+        return true
+    end
+
     local oUF = _G.oUF
     if not oUF then
         Log:Warn("oUF not detected; UnitFrames disabled.")
-        return
+        return false, "oUF not detected"
     end
 
     local unitframesCfg = GetUnitFramesCfg()
     if unitframesCfg.enabled == false then
         Log:Info("UnitFrames disabled (DB).")
-        return
-    end
-
-    if owner._inited then
-        return
+        return true
     end
 
     local style = Ctx().Style
     if type(style) ~= "function" then
         Log:Warn("UnitFrames style helper missing; runtime init aborted.")
-        return
+        return false, "UnitFrames style helper missing"
     end
 
     local createUnitMoverSpec = Ctx().CreateUnitMoverSpec
     if type(createUnitMoverSpec) ~= "function" then
         Log:Warn("UnitFrames mover-spec helper missing; runtime init aborted.")
-        return
+        return false, "UnitFrames mover-spec helper missing"
     end
 
-    owner._inited = true
-
-    oUF:RegisterStyle("FeelsGoodUI", style)
+    if not owner._styleRegistered then
+        oUF:RegisterStyle("FeelsGoodUI", style)
+        owner._styleRegistered = true
+    end
     oUF:SetActiveStyle("FeelsGoodUI")
 
-    local player = oUF:Spawn("player", "FGUI_Player")
-    local target = oUF:Spawn("target", "FGUI_Target")
-    local focus = oUF:Spawn("focus", "FGUI_Focus")
-    local targettarget = oUF:Spawn("targettarget", "FGUI_TargetTarget")
-    local pet = oUF:Spawn("pet", "FGUI_Pet")
+    local function SpawnOwned(field, unit, frameName)
+        local frame = owner[field]
+        if not frame then
+            frame = oUF:Spawn(unit, frameName)
+            if not frame then
+                return nil, "oUF failed to spawn " .. tostring(unit)
+            end
+            owner[field] = frame
+        end
+        return frame
+    end
+
+    local player, spawnError = SpawnOwned("player", "player", "FGUI_Player")
+    if not player then return false, spawnError end
+    local target
+    target, spawnError = SpawnOwned("target", "target", "FGUI_Target")
+    if not target then return false, spawnError end
+    local focus
+    focus, spawnError = SpawnOwned("focus", "focus", "FGUI_Focus")
+    if not focus then return false, spawnError end
+    local targettarget
+    targettarget, spawnError = SpawnOwned("targettarget", "targettarget", "FGUI_TargetTarget")
+    if not targettarget then return false, spawnError end
+    local pet
+    pet, spawnError = SpawnOwned("pet", "pet", "FGUI_Pet")
+    if not pet then return false, spawnError end
 
     Movers:Register("player", player, createUnitMoverSpec("player", "Player"))
     Movers:Register("target", target, createUnitMoverSpec("target", "Target"))
@@ -221,11 +262,7 @@ function Runtime:Init(owner)
     Movers:Apply("pet", pet)
     Movers:ApplyUnlockFromDB()
 
-    owner.player = player
-    owner.target = target
-    owner.focus = focus
-    owner.targettarget = targettarget
-    owner.pet = pet
+    owner._inited = true
 
     if focus then focus:Hide() end
     if targettarget then targettarget:Hide() end
@@ -236,6 +273,7 @@ function Runtime:Init(owner)
     end
 
     Log:Info("UnitFrames initialized (player/target/focus/targettarget/pet).")
+    return true
 end
 
 function Runtime:ApplyConfig(owner)
@@ -245,10 +283,11 @@ function Runtime:ApplyConfig(owner)
 
     if InCombat() then
         owner._configDirty = true
-        return
+        return true, "UnitFrames apply deferred in combat"
     end
 
     if unitframesCfg.enabled == false then
+        DetachObservers(owner)
         SetUnitWatch(owner.focus, false)
         SetUnitWatch(owner.targettarget, false)
         SetUnitWatch(owner.pet, false)
@@ -262,15 +301,23 @@ function Runtime:ApplyConfig(owner)
         if owner.player and owner.player.CombatTime then
             Call("StopCombatTimer", owner.player)
         end
-        return
+        return true
     end
 
     if not owner._inited then
-        owner:Init()
+        local initialized, detail = owner:Init()
+        if initialized == false then
+            return false, detail
+        end
     end
 
     if not owner.player or not owner.target then
-        return
+        return false, "UnitFrames player/target frames unavailable"
+    end
+
+    local attached, attachDetail = AttachObservers(owner)
+    if attached == false then
+        return false, attachDetail
     end
 
     local defaults = (DB.defaults and DB.defaults.profile and DB.defaults.profile.unitframes) or {}
@@ -307,12 +354,10 @@ function Runtime:ApplyConfig(owner)
         local combatTimer = type(unitframesCfg.combatTimer) == "table" and unitframesCfg.combatTimer or EMPTY
         if combatTimer.enabled == false then
             Call("StopCombatTimer", owner.player)
+        elseif InCombat() then
+            Call("StartCombatTimer", owner.player)
         else
-            if InCombat() then
-                Call("StartCombatTimer", owner.player)
-            else
-                Call("StopCombatTimer", owner.player)
-            end
+            Call("StopCombatTimer", owner.player)
         end
     end
 
@@ -328,6 +373,7 @@ function Runtime:ApplyConfig(owner)
 
     owner.player:Show()
     owner.target:Show()
+    return true
 end
 
 return Runtime

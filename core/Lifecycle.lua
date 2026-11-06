@@ -1,10 +1,4 @@
--- FeelsGoodUI: shared lifecycle helper for feature modules.
---
--- Narrow Phase 1 slice:
---  - keep current module internals intact;
---  - expose a stable Attach/Enable/Disable/Detach surface;
---  - let bootstrap wire modules through one registry instead of hand-written calls.
-
+-- FeelsGoodUI: shared lifecycle owner for feature modules
 local _, ns = ...
 
 local Lifecycle = ns.Lifecycle or {}
@@ -18,7 +12,11 @@ local EMPTY_SPEC = {}
 local function EnsureState(module)
     local state = rawget(module, "_lifecycleState")
     if type(state) ~= "table" then
-        state = {}
+        state = {
+            attached = false,
+            enabled = false,
+            generation = 0,
+        }
         module._lifecycleState = state
     end
     return state
@@ -26,10 +24,15 @@ end
 
 local function GetSpec(module)
     local spec = rawget(module, "_lifecycleSpec")
-    if type(spec) == "table" then
-        return spec
+    return type(spec) == "table" and spec or EMPTY_SPEC
+end
+
+local function ErrorHandler(err)
+    local message = tostring(err or "unknown lifecycle error")
+    if type(_G) == "table" and type(_G.debugstack) == "function" then
+        message = message .. "\n" .. _G.debugstack(3, 20, 20)
     end
-    return EMPTY_SPEC
+    return message
 end
 
 local function ResolveMethod(module, key)
@@ -42,89 +45,140 @@ local function ResolveMethod(module, key)
     return nil
 end
 
-local function CallModuleMethod(module, key)
+local function Invoke(module, key, phase)
     local fn = ResolveMethod(module, key)
-    if fn then
+    if not fn then
+        return false, "Missing lifecycle " .. tostring(phase) .. " method: " .. tostring(key)
+    end
+
+    local ok, result, detail = xpcall(function()
         return fn(module)
+    end, ErrorHandler)
+
+    if not ok then
+        return false, result
+    end
+    if result == false then
+        return false, detail
+    end
+    return true, detail
+end
+
+local function ResolveAttachKey(module, spec)
+    local key = spec.attach
+    if ResolveMethod(module, key) then
+        return key
+    end
+
+    local initKey = spec.init or "Init"
+    if ResolveMethod(module, initKey) then
+        return initKey
+    end
+
+    if ResolveMethod(module, "Attach") then
+        return "Attach"
     end
     return nil
 end
 
-local function InjectLifecycleMethods(module)
-    if type(module.Attach) ~= "function" then
-        function module:Attach()
-            local state = EnsureState(self)
-            if state.attached then
-                return true
-            end
+local function ResolveDetachKey(module, spec)
+    local key = spec.detach
+    if ResolveMethod(module, key) then
+        return key
+    end
+    if ResolveMethod(module, "Detach") then
+        return "Detach"
+    end
+    return nil
+end
 
-            local spec = GetSpec(self)
-            CallModuleMethod(self, spec.attach or spec.init or "Init")
-            state.attached = true
-            return true
-        end
+local function ResolveApplyKey(module, spec)
+    if spec.apply == false then
+        return false
+    end
+    local key = spec.apply or "ApplyConfig"
+    if ResolveMethod(module, key) then
+        return key
+    end
+    return nil
+end
+
+local function BeginTransition(state, transition)
+    if state.transition then
+        return false, "Lifecycle transition already active: " .. tostring(state.transition)
+    end
+    state.generation = (tonumber(state.generation) or 0) + 1
+    state.transition = transition
+    return true
+end
+
+local function FinishTransition(state, success, detail)
+    state.transition = nil
+    state.lastError = success and nil or detail
+    return success, detail
+end
+
+local function DetachModule(module, state, spec)
+    local key = ResolveDetachKey(module, spec)
+    if not key then
+        return false, "Missing lifecycle detach method"
     end
 
-    if type(module.Detach) ~= "function" then
-        function module:Detach()
-            local spec = GetSpec(self)
-            if not spec.detach then
-                return false
-            end
+    local ok, detail = Invoke(module, key, "detach")
+    if ok or module._detached == true then
+        state.attached = false
+        state.enabled = false
+        return true, detail
+    end
+    return false, detail
+end
 
-            CallModuleMethod(self, spec.detach)
-            local state = EnsureState(self)
-            state.attached = false
-            return true
-        end
+local function CleanupFailedAttach(module, state, spec)
+    local key = ResolveDetachKey(module, spec)
+    local cleanupOK = true
+    local cleanupDetail = nil
+
+    if key then
+        cleanupOK, cleanupDetail = Invoke(module, key, "attach cleanup")
+        cleanupOK = cleanupOK or module._detached == true
     end
 
+    -- Attach itself never completed, so this lifecycle owner must not advertise
+    -- an attached state even when best-effort cleanup reports a failure.
+    state.attached = false
+    state.enabled = false
+    state.cleanupError = cleanupOK and nil or cleanupDetail or "Attach cleanup returned false"
+    return cleanupOK, state.cleanupError
+end
+
+local function RollbackNewAttachment(module, state, spec)
+    local detached, detail = DetachModule(module, state, spec)
+    if detached then
+        state.cleanupError = nil
+        return true
+    end
+    state.cleanupError = detail or "Apply rollback detach returned false"
+    return false, state.cleanupError
+end
+
+local function InjectControlMethods(name, module)
     if type(module.Enable) ~= "function" then
         function module:Enable()
-            local state = EnsureState(self)
-            if state.enabled then
-                return true
-            end
-
-            local attached = self:Attach()
-            if attached == false then
-                state.attached = false
-                return false
-            end
-            state.attached = true
-
-            local spec = GetSpec(self)
-            if spec.apply ~= false then
-                CallModuleMethod(self, spec.apply or "ApplyConfig")
-            end
-
-            state.enabled = true
-            return true
+            return Lifecycle:Enable(name)
         end
+        module._lifecycleInjectedEnable = true
     end
 
     if type(module.Disable) ~= "function" then
         function module:Disable()
-            local spec = GetSpec(self)
-            if spec.disable then
-                CallModuleMethod(self, spec.disable)
-            elseif type(self.Detach) == "function" then
-                self:Detach()
-            end
-
-            local state = EnsureState(self)
-            state.attached = false
-            state.enabled = false
-            return true
+            return Lifecycle:Disable(name)
         end
+        module._lifecycleInjectedDisable = true
     end
 end
 
 function Lifecycle:RegisterModule(name, module, spec)
-    if type(name) ~= "string" or name == "" then
-        return module
-    end
-    if type(module) ~= "table" then
+    if type(name) ~= "string" or name == "" or type(module) ~= "table" then
         return module
     end
 
@@ -133,18 +187,18 @@ function Lifecycle:RegisterModule(name, module, spec)
         entry.module = module
         entry.spec = spec or EMPTY_SPEC
     else
-        self._modules[name] = {
+        entry = {
             module = module,
             spec = spec or EMPTY_SPEC,
         }
+        self._modules[name] = entry
         self._order[#self._order + 1] = name
     end
 
     module._lifecycleName = name
-    module._lifecycleSpec = spec or EMPTY_SPEC
-
-    InjectLifecycleMethods(module)
-
+    module._lifecycleSpec = entry.spec
+    EnsureState(module)
+    InjectControlMethods(name, module)
     return module
 end
 
@@ -153,28 +207,141 @@ function Lifecycle:GetModule(name)
     return entry and entry.module or nil
 end
 
+function Lifecycle:GetState(name)
+    local module = self:GetModule(name)
+    if not module then return nil end
+    return EnsureState(module)
+end
+
+function Lifecycle:IsEnabled(name)
+    local state = self:GetState(name)
+    return state and state.enabled == true or false
+end
+
 function Lifecycle:Enable(name)
     local module = self:GetModule(name)
-    if not module or type(module.Enable) ~= "function" then
-        return false
+    if not module then
+        return false, "Unknown lifecycle module: " .. tostring(name)
     end
-    return module:Enable()
+
+    local state = EnsureState(module)
+    if state.enabled then
+        return true
+    end
+
+    local started, detail = BeginTransition(state, "enable")
+    if not started then
+        return false, detail
+    end
+
+    local spec = GetSpec(module)
+    local attachedBefore = state.attached == true
+
+    if not attachedBefore then
+        local attachKey = ResolveAttachKey(module, spec)
+        if not attachKey then
+            return FinishTransition(state, false, "Missing lifecycle attach/init method")
+        end
+
+        local attached, attachDetail = Invoke(module, attachKey, "attach")
+        if not attached then
+            local cleaned, cleanupDetail = CleanupFailedAttach(module, state, spec)
+            if not cleaned and cleanupDetail then
+                attachDetail = tostring(attachDetail or "Attach returned false") .. "; cleanup: " .. tostring(cleanupDetail)
+            end
+            return FinishTransition(state, false, attachDetail)
+        end
+        state.attached = true
+    end
+
+    local applyKey = ResolveApplyKey(module, spec)
+    if applyKey == nil then
+        local detail = "Missing lifecycle apply method"
+        if not attachedBefore then
+            local cleaned, cleanupDetail = RollbackNewAttachment(module, state, spec)
+            if not cleaned and cleanupDetail then
+                detail = detail .. "; cleanup: " .. tostring(cleanupDetail)
+            end
+        end
+        return FinishTransition(state, false, detail)
+    end
+
+    if applyKey ~= false then
+        local applied, applyDetail = Invoke(module, applyKey, "apply")
+        if not applied then
+            if not attachedBefore then
+                local cleaned, cleanupDetail = RollbackNewAttachment(module, state, spec)
+                if not cleaned and cleanupDetail then
+                    applyDetail = tostring(applyDetail or "Apply returned false") .. "; cleanup: " .. tostring(cleanupDetail)
+                end
+            end
+            return FinishTransition(state, false, applyDetail)
+        end
+    end
+
+    state.enabled = true
+    state.attached = true
+    return FinishTransition(state, true)
 end
 
 function Lifecycle:Disable(name)
     local module = self:GetModule(name)
-    if not module or type(module.Disable) ~= "function" then
-        return false
+    if not module then
+        return false, "Unknown lifecycle module: " .. tostring(name)
     end
-    return module:Disable()
+
+    local state = EnsureState(module)
+    if not state.enabled and not state.attached then
+        return true
+    end
+
+    local started, detail = BeginTransition(state, "disable")
+    if not started then
+        return false, detail
+    end
+
+    local detached, detachDetail = DetachModule(module, state, GetSpec(module))
+    if not detached then
+        return FinishTransition(state, false, detachDetail)
+    end
+
+    return FinishTransition(state, true, detachDetail)
 end
 
 function Lifecycle:EnableAll(order)
     local list = order or self._order
     if type(list) ~= "table" then
-        return
+        return false, { { name = "<order>", detail = "Invalid lifecycle order" } }
     end
+
+    local failures = {}
     for i = 1, #list do
-        self:Enable(list[i])
+        local name = list[i]
+        local ok, detail = self:Enable(name)
+        if not ok then
+            failures[#failures + 1] = { name = name, detail = detail }
+        end
     end
+
+    return #failures == 0, failures
 end
+
+function Lifecycle:DisableAll(order)
+    local list = order or self._order
+    if type(list) ~= "table" then
+        return false, { { name = "<order>", detail = "Invalid lifecycle order" } }
+    end
+
+    local failures = {}
+    for i = #list, 1, -1 do
+        local name = list[i]
+        local ok, detail = self:Disable(name)
+        if not ok then
+            failures[#failures + 1] = { name = name, detail = detail }
+        end
+    end
+
+    return #failures == 0, failures
+end
+
+return Lifecycle

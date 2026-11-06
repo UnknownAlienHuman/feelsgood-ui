@@ -29,11 +29,11 @@ Execution rule: every run records the exact client build, addon revision, result
 | 2 | `/reload` after default initialization | `FeelsGoodUIDB` remains valid; no duplicate registrations or frames |  |  |
 | 3 | `/fgui qa` and `/fgui report` | Commands finish without schema, legacy-field, or serialization errors |  |  |
 | 4 | Open every settings category repeatedly | Navigation, resize, scrolling, and reopen remain stable |  |  |
-| 5 | Change settings, apply, undo, and rollback | One logical action reverts atomically; no partial profile mutation |  |  |
+| 5 | Change settings, apply, undo, reset, and force one apply failure | The logical batch commits atomically or restores profile, runtime owners, and exact undo history |  |  |
 | 6 | Export/import a valid profile | Round trip preserves supported settings and positions |  |  |
 | 7 | Import malformed, oversized, or wrong-schema data | Import fails cleanly without modifying the active profile |  |  |
 | 8 | Unlock/lock movers; drag near every screen edge | Inspector and frames remain clamped; positions persist after reload |  |  |
-| 9 | Enable/disable Unit Frames repeatedly | Frames and observers attach once and fully detach without stale callbacks |  |  |
+| 9 | Login with UnitFrames/CenterBars disabled, then enable; repeat disable/re-enable | Frames initialize once; observers/events attach once; live updates start without reload or stale owner state |  |  |
 | 10 | Player health in ordinary world context | Value, percent, low-health glow, and color update correctly |  |  |
 | 11 | Target/focus/targettarget ordinary values | Name, level, class, classification, reaction color, and target-of-target update |  |  |
 | 12 | Restricted/Secret health or identity context | No Lua operation error; opaque text uses native display or unavailable state |  |  |
@@ -50,13 +50,14 @@ Execution rule: every run records the exact client build, addon revision, result
 | 23 | Experience/reputation/honor states | Correct bar is shown; capped/unsupported states hide cleanly |  |  |
 | 24 | Theme/media/minimap icon/profile switch | Fonts, textures, colors, icon actions, and profile refresh remain coherent |  |  |
 | 25 | Full combat smoke with taint logging enabled | No `ADDON_ACTION_BLOCKED`, `ADDON_ACTION_FORBIDDEN`, or repeating errors |  |  |
+| 26 | Inject one feature attach/apply failure while other families are valid | Failed feature cleans up and remains disabled; later families still enable; exact owner/error is reported |  |  |
 
 ## Required smoke order
 
 1. Capture the run header, then fresh login.
 2. Run `/fgui qa` and `/fgui report`.
 3. Exercise settings, profile round trip, and movers out of combat.
-4. Exercise unit frames and center bars in ordinary and restricted contexts.
+4. Exercise disabled-at-login enable paths, then ordinary and restricted unit/center data.
 5. Enter/leave combat while changing action-bar settings.
 6. Disable/re-enable every feature family.
 7. `/reload`, confirm persistence, and inspect the first error/taint event if any.
