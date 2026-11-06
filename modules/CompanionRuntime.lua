@@ -27,16 +27,13 @@ local function GetActiveModule(module)
     return ns.Companion or module
 end
 
-local function CancelDebounce(key)
-    if not (Safety and Safety._timers and key) then
+local function CancelPendingWork()
+    if not (Safety and Safety.CancelDebounce) then
         return
     end
 
-    local timer = Safety._timers[key]
-    if type(timer) == "table" and type(timer.Cancel) == "function" then
-        pcall(timer.Cancel, timer)
-    end
-    Safety._timers[key] = nil
+    Safety.CancelDebounce(Shared.APPLY_DEBOUNCE_KEY)
+    Safety.CancelDebounce(Shared.MICRO_LAYOUT_RETRY_KEY)
 end
 
 local function FinalizeDetach(module)
@@ -152,10 +149,6 @@ function Runtime.RequestApply(module)
         return false
     end
 
-    if Safety and Safety._timers and Safety._timers[Shared.APPLY_DEBOUNCE_KEY] then
-        return true
-    end
-
     if Safety and Safety.Debounce and Safety.Debounce(Shared.APPLY_DEBOUNCE_KEY, 0.03, function()
         Runtime.ApplyConfig(GetActiveModule(module))
     end) then
@@ -226,10 +219,7 @@ function Runtime.Detach(module)
     module._pendingAfterCombat = nil
     module._applyingMicroLayout = nil
 
-    CancelDebounce(Shared.APPLY_DEBOUNCE_KEY)
-    if MicroBags and MicroBags.CancelPendingLayoutRetry then
-        MicroBags:CancelPendingLayoutRetry()
-    end
+    CancelPendingWork()
 
     if module._callbackHandles and type(module._callbackHandles.Unregister) == "function" then
         module._callbackHandles:Unregister()
