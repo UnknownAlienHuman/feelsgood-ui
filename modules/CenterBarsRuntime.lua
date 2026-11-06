@@ -216,32 +216,40 @@ function Runtime:Init(owner)
     local h2 = tonumber(center.powerHeight) or 14
     local gap = tonumber(center.spacing) or 6
 
-    local f = CreateFrame("Frame", "FGUI_Center", UIParent)
+    local f = owner.frame
+    if not f then
+        f = CreateFrame("Frame", "FGUI_Center", UIParent)
+        owner.frame = f
+    end
     f:SetSize(w, h1 + gap + h2)
 
-    local resource = CreateFrame("Frame", nil, f)
+    local resource = owner.resourceBar
+    if not resource then
+        resource = CreateFrame("Frame", nil, f)
+        owner.resourceBar = resource
+    end
+    resource:ClearAllPoints()
     resource:SetPoint("TOP", f, "TOP", 0, 0)
     resource:SetSize(w, h1)
 
-    local segments = {}
-    owner.frame = f
-    owner.resourceBar = resource
-    owner.resourceSegments = segments
+    owner.resourceSegments = owner.resourceSegments or {}
 
     local maxSeg = tonumber(center.maxSegments) or 10
     if maxSeg < 6 then maxSeg = 6 end
     ensureSegmentPool(owner, maxSeg, h1)
 
-    local power = createPowerBar(f, w, h2)
+    local power = owner.powerBar
     if not power then
-        owner.frame = nil
-        owner.resourceBar = nil
-        owner.resourceSegments = nil
-        Log:Warn("CenterBars power bar helper returned nil; init aborted.")
-        return false, "CenterBars power bar helper returned nil"
+        power = createPowerBar(f, w, h2)
+        if not power then
+            f:Hide()
+            Log:Warn("CenterBars power bar helper returned nil; init aborted.")
+            return false, "CenterBars power bar helper returned nil"
+        end
+        owner.powerBar = power
     end
+    power:ClearAllPoints()
     power:SetPoint("TOP", resource, "BOTTOM", 0, -gap)
-    owner.powerBar = power
 
     Movers:Register("center", f, createCenterMoverSpec("Center"))
     Movers:Apply("center", f)

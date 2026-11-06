@@ -216,14 +216,38 @@ function Runtime:Init(owner)
         return false, "UnitFrames mover-spec helper missing"
     end
 
-    oUF:RegisterStyle("FeelsGoodUI", style)
+    if not owner._styleRegistered then
+        oUF:RegisterStyle("FeelsGoodUI", style)
+        owner._styleRegistered = true
+    end
     oUF:SetActiveStyle("FeelsGoodUI")
 
-    local player = oUF:Spawn("player", "FGUI_Player")
-    local target = oUF:Spawn("target", "FGUI_Target")
-    local focus = oUF:Spawn("focus", "FGUI_Focus")
-    local targettarget = oUF:Spawn("targettarget", "FGUI_TargetTarget")
-    local pet = oUF:Spawn("pet", "FGUI_Pet")
+    local function SpawnOwned(field, unit, frameName)
+        local frame = owner[field]
+        if not frame then
+            frame = oUF:Spawn(unit, frameName)
+            if not frame then
+                return nil, "oUF failed to spawn " .. tostring(unit)
+            end
+            owner[field] = frame
+        end
+        return frame
+    end
+
+    local player, spawnError = SpawnOwned("player", "player", "FGUI_Player")
+    if not player then return false, spawnError end
+    local target
+    target, spawnError = SpawnOwned("target", "target", "FGUI_Target")
+    if not target then return false, spawnError end
+    local focus
+    focus, spawnError = SpawnOwned("focus", "focus", "FGUI_Focus")
+    if not focus then return false, spawnError end
+    local targettarget
+    targettarget, spawnError = SpawnOwned("targettarget", "targettarget", "FGUI_TargetTarget")
+    if not targettarget then return false, spawnError end
+    local pet
+    pet, spawnError = SpawnOwned("pet", "pet", "FGUI_Pet")
+    if not pet then return false, spawnError end
 
     Movers:Register("player", player, createUnitMoverSpec("player", "Player"))
     Movers:Register("target", target, createUnitMoverSpec("target", "Target"))
@@ -238,11 +262,6 @@ function Runtime:Init(owner)
     Movers:Apply("pet", pet)
     Movers:ApplyUnlockFromDB()
 
-    owner.player = player
-    owner.target = target
-    owner.focus = focus
-    owner.targettarget = targettarget
-    owner.pet = pet
     owner._inited = true
 
     if focus then focus:Hide() end
@@ -264,7 +283,7 @@ function Runtime:ApplyConfig(owner)
 
     if InCombat() then
         owner._configDirty = true
-        return false, "UnitFrames apply deferred in combat"
+        return true, "UnitFrames apply deferred in combat"
     end
 
     if unitframesCfg.enabled == false then
