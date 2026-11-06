@@ -4,7 +4,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 
 ## Retail 12.1.5 implementation status
 
-- [x] Target Interface `120105` and release `0.0.43`.
+- [x] Target Interface `120105` and release `0.0.44`.
 - [x] Gate Secret/Restricted Values before Lua inspection, conversion, comparison, or formatting.
 - [x] Integrate restricted Unit Frame and Center Bar handling into the canonical render/target owners; remove late method overrides and duplicate producer calls.
 - [x] Keep opaque power/text on exact native sinks where available; otherwise render an explicit unavailable state.
@@ -13,6 +13,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 - [x] Make the static checker fail on syntax, TOC, duplicate, missing-file, and load-order errors; expose `npm test`.
 - [x] Replace the stale 12.0.1/removed-feature regression matrix with current 12.1.5 coverage.
 - [x] Invalidate queued ActionBars apply/hide/auto-hide work on detach, silence permanent hooks while detached, and defer Blizzard-shell restoration through one post-combat watcher.
+- [x] Define one shared debounce contract: an existing keyed timer is a successful coalesced request, callers never inspect `Safety._timers`, and teardown cancellation invalidates generations before restore.
 
 ## Required in-game validation
 
@@ -22,6 +23,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 - [ ] Player/target/focus/targettarget frames handle ordinary and restricted health/name/classification values without formatting errors or opaque readback.
 - [ ] Target aura filtering handles ordinary and inaccessible aura-source payloads without indexing denied tables or fields.
 - [ ] Center bars handle ordinary and restricted power/rune values without duplicate producer calls, error loops, retained opaque samples, or stale text.
+- [ ] Companion micro-menu/bag hooks coalesce repeated show/hide/layout requests instead of bypassing the queue; detach cancels both apply and micro-layout generations.
 - [ ] Disable ActionBars both out of combat and during combat; after combat, Blizzard shell is restored once and no stale delayed hide/apply callback reclaims it.
 - [ ] Rapid `Disable -> Enable` before queued callbacks fire does not execute an older lifecycle generation.
 - [ ] Enter/leave combat with action bars, movers, Edit Mode, profile apply/import/reset, and module disable/enable; no `ADDON_ACTION_BLOCKED` or `ADDON_ACTION_FORBIDDEN`.
