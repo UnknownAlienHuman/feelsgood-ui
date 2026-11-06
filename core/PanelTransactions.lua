@@ -14,11 +14,14 @@ local U = ns.U
 local OriginalContext = Shared and Shared.CreateBuilderContext
 local OriginalBind = Shared and Shared.BindPanelApplyControls
 local OriginalInvalidateAll = Settings and Settings.InvalidateAllHistory
+local OriginalResetSection = Settings and Settings.ResetSection
+local OriginalResetSections = Settings and Settings.ResetSections
 local OriginalSetTx = Settings and Settings.SetTx
 local OriginalUndo = Settings and Settings.UndoPanel
 
 Tx._nextID = Tx._nextID or 0
 Tx._byKey = Tx._byKey or {}
+Tx._sectionEpoch = Tx._sectionEpoch or {}
 
 local function Copy(value)
     if type(value) == "table" and U and type(U.DeepCopy) == "function" then
@@ -58,6 +61,35 @@ local function Profile()
     return type(profile) == "table" and profile or nil
 end
 
+local function DeepEqual(a, b, seen)
+    if rawequal(a, b) then return true end
+    if type(a) ~= type(b) or type(a) ~= "table" then return false end
+
+    seen = seen or {}
+    if seen[a] == b then return true end
+    seen[a] = b
+
+    for key, value in pairs(a) do
+        if not DeepEqual(value, b[key], seen) then return false end
+    end
+    for key in pairs(b) do
+        if a[key] == nil then return false end
+    end
+    return true
+end
+
+local function CurrentEpoch(section)
+    return type(section) == "string" and (Tx._sectionEpoch[section] or 0) or 0
+end
+
+local function AdvanceEpoch(section)
+    if type(section) ~= "string" or section == "" then return nil end
+    local before = CurrentEpoch(section)
+    local owned = before + 1
+    Tx._sectionEpoch[section] = owned
+    return { section = section, before = before, owned = owned }
+end
+
 local function SnapshotPath(path)
     local profile = Profile()
     local copiedPath = CopyPath(path)
@@ -69,10 +101,23 @@ local function SnapshotPath(path)
         local key = copiedPath[i]
         local child = node[key]
         if child == nil then
-            return { path = copiedPath, branchDepth = i, existed = false }
+            return {
+                path = copiedPath,
+                section = copiedPath[1],
+                epoch = CurrentEpoch(copiedPath[1]),
+                branchDepth = i,
+                existed = false,
+            }
         end
         if type(child) ~= "table" then
-            return { path = copiedPath, branchDepth = i, existed = true, value = Copy(child) }
+            return {
+                path = copiedPath,
+                section = copiedPath[1],
+                epoch = CurrentEpoch(copiedPath[1]),
+                branchDepth = i,
+                existed = true,
+                value = Copy(child),
+            }
         end
         node = child
     end
@@ -81,12 +126,25 @@ local function SnapshotPath(path)
     local key = copiedPath[#copiedPath]
     return {
         path = copiedPath,
+        section = copiedPath[1],
+        epoch = CurrentEpoch(copiedPath[1]),
         existed = node[key] ~= nil,
         value = Copy(node[key]),
     }
 end
 
-local function RestorePath(snapshot)
+local function ReadPath(path)
+    local node = Profile()
+    if not node or type(path) ~= "table" then return false, nil end
+    for i = 1, #path - 1 do
+        node = type(node) == "table" and node[path[i]] or nil
+        if type(node) ~= "table" then return false, nil end
+    end
+    local key = path[#path]
+    return node[key] ~= nil, node[key]
+end
+
+local function WritePath(snapshot)
     local profile = Profile()
     if not profile or type(snapshot) ~= "table" or type(snapshot.path) ~= "table" then return false end
 
@@ -98,10 +156,16 @@ local function RestorePath(snapshot)
         if type(node[key]) ~= "table" then node[key] = {} end
         node = node[key]
     end
-
-    local key = path[stop]
-    node[key] = snapshot.existed and Copy(snapshot.value) or nil
+    node[path[stop]] = snapshot.existed and Copy(snapshot.value) or nil
     return true
+end
+
+local function OwnsPath(snapshot, expected)
+    if CurrentEpoch(snapshot.section) ~= snapshot.epoch then return false end
+    local exists, current = ReadPath(snapshot.path)
+    if expected == nil then return not exists end
+    if type(expected) == "table" then return exists and rawequal(current, expected) end
+    return exists and current == expected
 end
 
 local function SnapshotSections(sections)
@@ -121,77 +185,202 @@ local function SnapshotSections(sections)
     return snapshot
 end
 
-local function RestoreSections(snapshot)
-    local profile = Profile()
-    if not profile or type(snapshot) ~= "table" then return false end
-    for i = 1, #snapshot do
-        local record = snapshot[i]
-        profile[record.name] = record.existed and Copy(record.value) or nil
+local function ClaimSections(snapshot)
+    for i = 1, #(snapshot or {}) do
+        snapshot[i].epoch = AdvanceEpoch(snapshot[i].name)
+        local profile = Profile()
+        snapshot[i].expected = profile and Copy(profile[snapshot[i].name]) or nil
     end
-    return true
 end
 
-local function SnapshotHistory(panelKey)
+local function CollectDiff(expected, current, path, out)
+    if DeepEqual(expected, current) then return end
+    if type(expected) == "table" and type(current) == "table" then
+        local seen = {}
+        for key in pairs(expected) do
+            seen[key] = true
+            local nextPath = CopyPath(path) or {}
+            nextPath[#nextPath + 1] = key
+            CollectDiff(expected[key], current[key], nextPath, out)
+        end
+        for key in pairs(current) do
+            if not seen[key] then
+                local nextPath = CopyPath(path) or {}
+                nextPath[#nextPath + 1] = key
+                CollectDiff(nil, current[key], nextPath, out)
+            end
+        end
+        return
+    end
+    out[#out + 1] = { path = CopyPath(path) or {}, existed = current ~= nil, value = Copy(current) }
+end
+
+local function ApplyRelative(section, changes)
+    local profile = Profile()
+    if not profile then return end
+    for i = 1, #changes do
+        local change = changes[i]
+        if #change.path == 0 then
+            profile[section] = change.existed and Copy(change.value) or nil
+        else
+            if type(profile[section]) ~= "table" then profile[section] = {} end
+            local node = profile[section]
+            for j = 1, #change.path - 1 do
+                local key = change.path[j]
+                if type(node[key]) ~= "table" then node[key] = {} end
+                node = node[key]
+            end
+            node[change.path[#change.path]] = change.existed and Copy(change.value) or nil
+        end
+    end
+end
+
+local function RestoreClaimedSections(snapshot)
+    local profile = Profile()
+    if not profile then return false end
+    local changed = false
+
+    for i = 1, #(snapshot or {}) do
+        local record = snapshot[i]
+        local epoch = record.epoch
+        if epoch and CurrentEpoch(record.name) == epoch.owned then
+            local overlay = {}
+            CollectDiff(record.expected, profile[record.name], {}, overlay)
+            profile[record.name] = record.existed and Copy(record.value) or nil
+            ApplyRelative(record.name, overlay)
+            Tx._sectionEpoch[record.name] = epoch.before
+            changed = true
+        end
+    end
+    return changed
+end
+
+local function HistoryState(panelKey)
     if not Settings or type(panelKey) ~= "string" or panelKey == "" then return nil end
-    local undo = type(Settings._undoPanels) == "table" and Settings._undoPanels[panelKey] or nil
+    local stack = type(Settings._undoPanels) == "table" and Settings._undoPanels[panelKey] or nil
     local batch = type(Settings._undoPanelBatches) == "table" and Settings._undoPanelBatches[panelKey] or nil
     return {
         panelKey = panelKey,
-        undoExisted = undo ~= nil,
-        undo = Copy(undo),
-        batchExisted = batch ~= nil,
-        batch = Copy(batch),
+        stack = stack,
+        stackLength = type(stack) == "table" and #stack or 0,
+        batch = batch,
+        changeLength = type(batch) == "table" and type(batch.changes) == "table" and #batch.changes or 0,
     }
 end
 
-local function RestoreHistory(snapshot)
-    if not Settings or type(snapshot) ~= "table" then return false end
-    Settings._undoPanels = Settings._undoPanels or {}
-    Settings._undoPanelBatches = Settings._undoPanelBatches or {}
-    Settings._undoPanels[snapshot.panelKey] = snapshot.undoExisted and Copy(snapshot.undo) or nil
-    Settings._undoPanelBatches[snapshot.panelKey] = snapshot.batchExisted and Copy(snapshot.batch) or nil
-    return true
+local function CaptureHistoryArtifact(before)
+    if type(before) ~= "table" then return nil end
+    local batch = before.batch
+    if type(batch) == "table" and type(batch.changes) == "table" and #batch.changes > before.changeLength then
+        return { container = batch.changes, entry = batch.changes[before.changeLength + 1] }
+    end
+
+    local stack = type(Settings._undoPanels) == "table" and Settings._undoPanels[before.panelKey] or nil
+    if type(stack) == "table" and #stack > before.stackLength then
+        return { container = stack, entry = stack[before.stackLength + 1] }
+    end
+    return nil
 end
 
-local function UndoSections(panelKey)
-    local stack = Settings and type(Settings._undoPanels) == "table" and Settings._undoPanels[panelKey] or nil
-    local entry = type(stack) == "table" and stack[#stack] or nil
-    if type(entry) ~= "table" then return nil end
+local function RemoveArtifact(artifact)
+    local container = artifact and artifact.container
+    if type(container) ~= "table" then return false end
+    for i = #container, 1, -1 do
+        if container[i] == artifact.entry then
+            table.remove(container, i)
+            return true
+        end
+    end
+    return false
+end
 
-    local sections = {}
+local function UndoRecord(panelKey)
+    local stack = Settings and type(Settings._undoPanels) == "table" and Settings._undoPanels[panelKey] or nil
+    local index = type(stack) == "table" and #stack or 0
+    local entry = index > 0 and stack[index] or nil
+    if type(entry) ~= "table" then return nil end
+    return { panelKey = panelKey, stack = stack, index = index, entry = entry }
+end
+
+local function UndoChanges(entry)
+    local out = {}
     local function Add(change)
-        local path = change and change.path
-        if type(path) == "table" then sections[#sections + 1] = path[1] end
+        if type(change) == "table" and type(change.path) == "table" then
+            local snapshot = SnapshotPath(change.path)
+            if snapshot then
+                out[#out + 1] = { snapshot = snapshot, expected = change.old }
+            end
+        end
     end
     if type(entry.changes) == "table" then
         for i = 1, #entry.changes do Add(entry.changes[i]) end
     else
         Add(entry)
     end
-    return UniqueStrings(sections)
+    return out
+end
+
+local function RestoreUndoHistory(record)
+    if type(record) ~= "table" then return false end
+    local stack = type(Settings._undoPanels) == "table" and Settings._undoPanels[record.panelKey] or nil
+    if type(stack) ~= "table" then
+        Settings._undoPanels = Settings._undoPanels or {}
+        stack = {}
+        Settings._undoPanels[record.panelKey] = stack
+    end
+    for i = 1, #stack do if stack[i] == record.entry then return false end end
+    table.insert(stack, math.min(record.index, #stack + 1), record.entry)
+    return true
+end
+
+local function CaptureHistoryEntries(panelKey)
+    local stack = Settings and type(Settings._undoPanels) == "table" and Settings._undoPanels[panelKey] or nil
+    local entries = {}
+    for i = 1, #(stack or {}) do entries[#entries + 1] = stack[i] end
+    local batch = Settings and type(Settings._undoPanelBatches) == "table" and Settings._undoPanelBatches[panelKey] or nil
+    local changes = {}
+    for i = 1, #(batch and batch.changes or {}) do changes[#changes + 1] = batch.changes[i] end
+    return { panelKey = panelKey, stack = stack, entries = entries, changes = changes, batch = batch }
+end
+
+local function RemoveCapturedHistory(captured)
+    for i = 1, #(captured and captured.entries or {}) do
+        RemoveArtifact({ container = captured.stack, entry = captured.entries[i] })
+    end
+    for i = 1, #(captured and captured.changes or {}) do
+        RemoveArtifact({ container = captured.batch and captured.batch.changes, entry = captured.changes[i] })
+    end
+
+    local panelKey = captured and captured.panelKey
+    if panelKey and captured.stack and #captured.stack == 0
+        and Settings._undoPanels and Settings._undoPanels[panelKey] == captured.stack then
+        Settings._undoPanels[panelKey] = nil
+    end
+    if panelKey and captured.batch and type(captured.batch.changes) == "table" and #captured.batch.changes == 0
+        and Settings._undoPanelBatches and Settings._undoPanelBatches[panelKey] == captured.batch then
+        Settings._undoPanelBatches[panelKey] = nil
+    end
 end
 
 local function SafeCall(label, fn)
-    if type(fn) ~= "function" then return end
-    local ok, err = pcall(fn)
-    if not ok and Log and type(Log.Error) == "function" then
-        Log:Error(label .. ": " .. tostring(err))
+    if type(fn) ~= "function" then return nil end
+    local ok, result = pcall(fn)
+    if not ok then
+        if Log and type(Log.Error) == "function" then Log:Error(label .. ": " .. tostring(result)) end
+        return nil
     end
+    return result
 end
 
 local function RemoveFromKey(transaction, key)
     local list = Tx._byKey[key]
     if type(list) ~= "table" then return end
-    for i = #list, 1, -1 do
-        if list[i] == transaction then table.remove(list, i) end
-    end
+    for i = #list, 1, -1 do if list[i] == transaction then table.remove(list, i) end end
     if #list == 0 then Tx._byKey[key] = nil end
 end
 
 local function Remove(transaction)
-    for i = 1, #(transaction.keys or {}) do
-        RemoveFromKey(transaction, transaction.keys[i])
-    end
+    for i = 1, #(transaction.keys or {}) do RemoveFromKey(transaction, transaction.keys[i]) end
 end
 
 local function Gather(keys)
@@ -201,10 +390,7 @@ local function Gather(keys)
         local list = Tx._byKey[normalized[i]]
         for j = 1, #(list or {}) do
             local transaction = list[j]
-            if not seen[transaction] then
-                seen[transaction] = true
-                out[#out + 1] = transaction
-            end
+            if not seen[transaction] then seen[transaction] = true; out[#out + 1] = transaction end
         end
     end
     return out, normalized
@@ -213,13 +399,11 @@ end
 function Tx:Register(keys, transaction)
     local normalized = UniqueStrings(keys)
     if #normalized == 0 or type(transaction) ~= "table" then return false end
-
     self._nextID = self._nextID + 1
     transaction.id = self._nextID
     transaction.keys = normalized
     transaction.waiting = {}
     transaction.committed = {}
-
     for i = 1, #normalized do
         local key = normalized[i]
         transaction.waiting[key] = true
@@ -232,7 +416,6 @@ end
 function Tx:CommitKeys(keys)
     local transactions, normalized = Gather(keys)
     local finished = {}
-
     for i = 1, #transactions do
         local transaction = transactions[i]
         for j = 1, #normalized do
@@ -245,7 +428,6 @@ function Tx:CommitKeys(keys)
         end
         if next(transaction.waiting) == nil then finished[#finished + 1] = transaction end
     end
-
     table.sort(finished, function(a, b) return a.id < b.id end)
     for i = 1, #finished do
         local transaction = finished[i]
@@ -259,94 +441,99 @@ end
 function Tx:RollbackKeys(keys)
     local transactions = Gather(keys)
     table.sort(transactions, function(a, b) return a.id > b.id end)
-
     local callbacks, restoreKeys = {}, {}
     for i = 1, #transactions do
         local transaction = transactions[i]
         Remove(transaction)
-        SafeCall("Settings transaction rollback", transaction.rollback)
-        for key in pairs(transaction.committed or {}) do restoreKeys[#restoreKeys + 1] = key end
-        if type(transaction.onRollback) == "function" then
-            callbacks[#callbacks + 1] = transaction.onRollback
+        local changed = SafeCall("Settings transaction rollback", transaction.rollback) == true
+        if changed then
+            for key in pairs(transaction.committed or {}) do restoreKeys[#restoreKeys + 1] = key end
         end
+        if type(transaction.onRollback) == "function" then callbacks[#callbacks + 1] = transaction.onRollback end
     end
     return (#callbacks > 0 and callbacks or nil), UniqueStrings(restoreKeys)
 end
 
 function Tx:RunRollbackCallbacks(callbacks)
-    for i = 1, #(callbacks or {}) do
-        SafeCall("Settings transaction onRollback", callbacks[i])
-    end
+    for i = 1, #(callbacks or {}) do SafeCall("Settings transaction onRollback", callbacks[i]) end
 end
 
 function Tx:InvalidateAll()
     self._byKey = {}
+    self._sectionEpoch = {}
 end
 
 function Tx:UndoPanel(panelKey, applyKeys, callbacks)
     if not (Settings and type(OriginalUndo) == "function") then return false end
     local keys = UniqueStrings(applyKeys)
-    if #keys == 0 or not (Apply and type(Apply.Request) == "function") then
-        return OriginalUndo(Settings, panelKey)
-    end
+    if #keys == 0 or not (Apply and type(Apply.Request) == "function") then return OriginalUndo(Settings, panelKey) end
 
-    local sections = SnapshotSections(UndoSections(panelKey))
-    local history = SnapshotHistory(panelKey)
-    if not sections or not history or OriginalUndo(Settings, panelKey) ~= true then return false end
+    local history = UndoRecord(panelKey)
+    local changes = history and UndoChanges(history.entry) or nil
+    if not history or #changes == 0 or OriginalUndo(Settings, panelKey) ~= true then return false end
 
     local transaction = {
         rollback = function()
-            RestoreSections(sections)
-            RestoreHistory(history)
+            local owned = {}
+            for i = 1, #changes do
+                owned[i] = OwnsPath(changes[i].snapshot, changes[i].expected)
+            end
+
+            local changed = false
+            for i = 1, #changes do
+                if owned[i] then
+                    WritePath(changes[i].snapshot)
+                    changed = true
+                end
+            end
+            return RestoreUndoHistory(history) or changed
         end,
         onCommit = type(callbacks) == "table" and callbacks.onCommit or nil,
         onRollback = type(callbacks) == "table" and callbacks.onRollback or nil,
     }
     if self:Register(keys, transaction) then return true end
-
     transaction.rollback()
     return false
 end
 
 function Tx:ResetSections(panelKey, sections, applyKeys, callbacks)
-    if not (Settings and type(Settings.ResetSections) == "function") then return false end
     local keys = UniqueStrings(applyKeys)
     if #keys == 0 or not (Apply and type(Apply.Request) == "function") then
-        return Settings:ResetSections(sections)
+        return Settings and Settings:ResetSections(sections) or false
     end
 
-    local sectionSnapshot = SnapshotSections(sections)
-    local historySnapshot = SnapshotHistory(panelKey)
-    if not sectionSnapshot or not historySnapshot or Settings:ResetSections(sections) ~= true then return false end
+    local snapshot = SnapshotSections(sections)
+    local capturedHistory = CaptureHistoryEntries(panelKey)
+    if not snapshot then return false end
+
+    local reset
+    if type(OriginalResetSections) == "function" then
+        reset = OriginalResetSections(Settings, sections)
+    elseif type(OriginalResetSection) == "function" then
+        reset = false
+        for _, section in ipairs(UniqueStrings(sections)) do
+            reset = OriginalResetSection(Settings, section) or reset
+        end
+    end
+    if reset ~= true then return false end
+    ClaimSections(snapshot)
 
     local transaction = {
-        rollback = function()
-            RestoreSections(sectionSnapshot)
-            RestoreHistory(historySnapshot)
-        end,
-        commit = function()
-            if type(Settings.InvalidatePanelHistory) == "function" then
-                Settings:InvalidatePanelHistory(panelKey)
-            end
-        end,
+        rollback = function() return RestoreClaimedSections(snapshot) end,
+        commit = function() RemoveCapturedHistory(capturedHistory) end,
         onCommit = type(callbacks) == "table" and callbacks.onCommit or nil,
         onRollback = type(callbacks) == "table" and callbacks.onRollback or nil,
     }
     if self:Register(keys, transaction) then return true end
-
     transaction.rollback()
     return false
 end
 
 local function BindControls(applyState, undoBtn, resetBtn, resetSections, refreshFn, restoreApplyKeys)
-    if type(OriginalBind) == "function" then
-        OriginalBind(applyState, undoBtn, resetBtn, resetSections, refreshFn, restoreApplyKeys)
-    end
+    if type(OriginalBind) == "function" then OriginalBind(applyState, undoBtn, resetBtn, resetSections, refreshFn, restoreApplyKeys) end
     if type(applyState) ~= "table" then return end
-
     local keys = restoreApplyKeys or applyState.defaultApplyKeys
     local callbacks = { onRollback = refreshFn }
-
     if undoBtn then
         undoBtn:SetScript("OnClick", function()
             if Tx:UndoPanel(applyState.panelKey, keys, callbacks) then
@@ -355,7 +542,6 @@ local function BindControls(applyState, undoBtn, resetBtn, resetSections, refres
             end
         end)
     end
-
     if resetBtn then
         resetBtn:SetScript("OnClick", function()
             if Tx:ResetSections(applyState.panelKey, resetSections, keys, callbacks) then
@@ -370,18 +556,36 @@ end
 if Settings and type(OriginalSetTx) == "function" then
     function Settings:SetTx(applyKeys, path, value, rule, panelKey)
         local snapshot = SnapshotPath(path)
-        local history = SnapshotHistory(panelKey)
+        local historyBefore = HistoryState(panelKey)
         local changed, stored = OriginalSetTx(self, applyKeys, path, value, rule, panelKey)
         local keys = UniqueStrings(applyKeys)
         if changed == true and snapshot and #keys > 0 then
+            local artifact = CaptureHistoryArtifact(historyBefore)
             Tx:Register(keys, {
                 rollback = function()
-                    RestorePath(snapshot)
-                    if history then RestoreHistory(history) end
+                    local restored = false
+                    if OwnsPath(snapshot, stored) then restored = WritePath(snapshot) end
+                    return RemoveArtifact(artifact) or restored
                 end,
             })
         end
         return changed, stored
+    end
+end
+
+if Settings and type(OriginalResetSection) == "function" then
+    function Settings:ResetSection(section)
+        local result = OriginalResetSection(self, section)
+        if result == true then AdvanceEpoch(section) end
+        return result
+    end
+end
+
+if Settings and type(OriginalResetSections) == "function" then
+    function Settings:ResetSections(sections)
+        local result = OriginalResetSections(self, sections)
+        if result == true then for _, section in ipairs(UniqueStrings(sections)) do AdvanceEpoch(section) end end
+        return result
     end
 end
 
