@@ -70,6 +70,23 @@ local function RestoreThemeConsumers(appliedModules, failedModule)
     end
 end
 
+local function LogLifecycleFailures(failures)
+    if type(failures) ~= "table" or not (ns.Log and ns.Log.Warn) then
+        return
+    end
+
+    for i = 1, #failures do
+        local failure = failures[i]
+        local name = type(failure) == "table" and failure.name or "unknown"
+        local detail = type(failure) == "table" and failure.detail or nil
+        if detail ~= nil and detail ~= "" then
+            ns.Log:Warn(("Feature enable failed [%s]: %s"):format(tostring(name), tostring(detail)))
+        else
+            ns.Log:Warn(("Feature enable failed [%s]"):format(tostring(name)))
+        end
+    end
+end
+
 App._warned = App._warned or {}
 App._featureOrder = App._featureOrder or {
     "unitframes",
@@ -108,18 +125,26 @@ function App:RegisterFeatureModules()
 
     local lifecycle = ns.Lifecycle
     if not (lifecycle and lifecycle.RegisterModule) then
-        return false
+        return false, "Lifecycle.RegisterModule unavailable"
     end
 
     local specs = self:BuildFeatureSpecs()
     local registry = GetRegistry()
     local featureOrder = (registry and registry.GetFeatureOrder and registry:GetFeatureOrder()) or self._featureOrder
+    local missing = {}
+
     for i = 1, #featureOrder do
         local name = featureOrder[i]
         local spec = specs[name]
         if spec and type(spec.module) == "table" then
             lifecycle:RegisterModule(name, spec.module, spec)
+        else
+            missing[#missing + 1] = tostring(name)
         end
+    end
+
+    if #missing > 0 then
+        return false, "Missing feature modules: " .. table.concat(missing, ", ")
     end
 
     self._featureModulesRegistered = true
@@ -223,25 +248,38 @@ function App:ApplyByKey(key)
 end
 
 function App:EnableFeatureModules()
-    if self:RegisterFeatureModules() == false then
-        return false
+    local registered, registerDetail = self:RegisterFeatureModules()
+    if registered == false then
+        return false, { { name = "registration", detail = registerDetail } }
     end
 
     local lifecycle = ns.Lifecycle
     if not (lifecycle and lifecycle.Enable) then
-        return false
+        return false, { { name = "lifecycle", detail = "Lifecycle.Enable unavailable" } }
     end
 
     local registry = GetRegistry()
     local featureOrder = (registry and registry.GetFeatureOrder and registry:GetFeatureOrder()) or self._featureOrder
-    for i = 1, #featureOrder do
-        local name = featureOrder[i]
-        Guard("App.Enable." .. tostring(name), function()
-            lifecycle:Enable(name)
-        end)
+
+    local ok, failures
+    if type(lifecycle.EnableAll) == "function" then
+        ok, failures = lifecycle:EnableAll(featureOrder)
+    else
+        failures = {}
+        for i = 1, #featureOrder do
+            local name = featureOrder[i]
+            local enabled, detail = lifecycle:Enable(name)
+            if not enabled then
+                failures[#failures + 1] = { name = name, detail = detail }
+            end
+        end
+        ok = #failures == 0
     end
 
-    return true
+    if not ok then
+        LogLifecycleFailures(failures)
+    end
+    return ok, failures
 end
 
 function App:RunStartupServices()
@@ -285,7 +323,10 @@ function App:RunStartupServices()
         {
             label = "App.RegisterFeatureModules",
             run = function()
-                self:RegisterFeatureModules()
+                local ok, detail = self:RegisterFeatureModules()
+                if ok == false then
+                    error(detail or "Feature registration failed", 0)
+                end
             end,
         },
     }
