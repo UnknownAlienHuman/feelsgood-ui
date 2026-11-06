@@ -43,18 +43,18 @@ local function EnsureDataObject()
     return dataObj
 end
 
+local function HasWriteOwner()
+    return Settings
+        and type(Settings.SetTx) == "function"
+        and Apply
+        and type(Apply.Request) == "function"
+end
+
 local function RequestApply()
-    if not (Apply and type(Apply.Request) == "function") then
-        return false
-    end
     Apply:Request(APPLY_KEY)
-    return true
 end
 
 local function SetTx(path, value, rule)
-    if not (Settings and type(Settings.SetTx) == "function") then
-        return false, nil
-    end
     return Settings:SetTx(APPLY_KEY, path, value, rule, PANEL_KEY)
 end
 
@@ -114,6 +114,10 @@ function MinimapIcon:ApplyConfig()
 end
 
 function MinimapIcon:SetHidden(hidden)
+    if not HasWriteOwner() then
+        return false, nil
+    end
+
     local changed, stored = SetTx(
         { "minimap", "hide" },
         hidden == true,
@@ -126,26 +130,34 @@ function MinimapIcon:SetHidden(hidden)
 end
 
 function MinimapIcon:ResetPosition()
-    if not (Settings and type(Settings.SetTx) == "function") then
+    if not HasWriteOwner() then
         return false
     end
 
-    local batch = type(Settings.BeginPanelUndoBatch) == "function"
-        and Settings:BeginPanelUndoBatch(PANEL_KEY)
-        or nil
+    local batchStarted = type(Settings.BeginPanelUndoBatch) == "function"
+        and Settings:BeginPanelUndoBatch(PANEL_KEY) == true
 
-    local positionChanged = SetTx(
-        { "minimap", "minimapPos" },
-        220,
-        { type = "number", min = 0, max = 360, fallback = 220 }
-    )
-    local legacyChanged = SetTx({ "minimap", "angle" }, nil, nil)
+    local ok, positionChanged, legacyChanged = xpcall(function()
+        local changedPosition = SetTx(
+            { "minimap", "minimapPos" },
+            220,
+            { type = "number", min = 0, max = 360, fallback = 220 }
+        )
+        local changedLegacy = SetTx({ "minimap", "angle" }, nil, nil)
+        return changedPosition == true, changedLegacy == true
+    end, function(err)
+        return tostring(err or "unknown minimap reset error")
+    end)
 
-    if batch and type(Settings.EndPanelUndoBatch) == "function" then
-        Settings:EndPanelUndoBatch(PANEL_KEY, batch)
+    if batchStarted and type(Settings.EndPanelUndoBatch) == "function" then
+        Settings:EndPanelUndoBatch(PANEL_KEY)
     end
 
-    local changed = positionChanged == true or legacyChanged == true
+    if not ok then
+        error(positionChanged, 0)
+    end
+
+    local changed = positionChanged or legacyChanged
     if changed then
         RequestApply()
     end
