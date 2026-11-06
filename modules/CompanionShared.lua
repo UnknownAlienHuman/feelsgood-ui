@@ -10,6 +10,7 @@ local DB = ns.DB
 local InCombat = InCombatLockdown or function() return false end
 
 Shared.APPLY_DEBOUNCE_KEY = "FGUI_COMPANION_APPLY"
+Shared.MICRO_LAYOUT_RETRY_KEY = "FGUI_COMPANION_MICRO_LAYOUT"
 Shared.PET_BUTTONS = (_G.NUM_PET_ACTION_SLOTS) or 10
 Shared.PET_KEY = "petbar"
 Shared.MICRO_KEY = "micromenu"
