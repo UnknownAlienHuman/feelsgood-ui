@@ -223,9 +223,10 @@ function Runtime:Init(owner)
     resource:SetPoint("TOP", f, "TOP", 0, 0)
     resource:SetSize(w, h1)
 
+    local segments = {}
     owner.frame = f
     owner.resourceBar = resource
-    owner.resourceSegments = {}
+    owner.resourceSegments = segments
 
     local maxSeg = tonumber(center.maxSegments) or 10
     if maxSeg < 6 then maxSeg = 6 end
