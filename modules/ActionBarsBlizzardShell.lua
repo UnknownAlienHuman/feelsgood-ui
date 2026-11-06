@@ -275,7 +275,9 @@ function Shell.RestoreBlizzardArt(module, barsCfg)
         module._pendingRestore = nil
     end
 
-    if restored then
+    if IsDetached(module) then
+        Shell.QueueManagedPositionsRefresh(nil, true)
+    elseif restored then
         Shell.QueueManagedPositionsRefresh(module)
     end
 
