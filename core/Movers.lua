@@ -66,6 +66,7 @@ Movers._activeKey = Movers._activeKey or nil
 Movers._activeOverlay = Movers._activeOverlay or nil
 Movers._stateListeners = Movers._stateListeners or {}
 
+-- Grid state
 Movers._grid = Movers._grid or {
     frame = nil,
     textures = nil,
@@ -74,6 +75,7 @@ Movers._grid = Movers._grid or {
     step = 0,
 }
 
+-- Reused scratch tables for snap targets (avoid allocs in OnUpdate)
 Movers._snapScratch = Movers._snapScratch or { xt = {}, yt = {} }
 Movers._globalHint = Movers._globalHint or nil
 
@@ -293,6 +295,8 @@ local function SnapshotMutationSections(spec)
         }
     end
 
+    -- Enter the sandbox only after every requested section was resolved. This
+    -- keeps a failed setup from replacing a subset of live profile sections.
     for i = 1, #records do
         local record = records[i]
         profile[record.name] = record.working
@@ -341,8 +345,10 @@ local function CommitSpecMutation(spec, setter, ...)
     end
 
     local args = Pack(...)
-    local ok, result = pcall(CallPacked, setter, args)
-    local captured = ok and CaptureMutationSections(records)
+    local ok, result, captured = pcall(function()
+        local setterResult = CallPacked(setter, args)
+        return setterResult, CaptureMutationSections(records)
+    end)
     RestoreMutationSections(records)
 
     if not ok then
@@ -398,22 +404,24 @@ local function PreviewSpecMutation(spec, setter, reader, ...)
     if not records then return false end
 
     local args = Pack(...)
-    local ok, err = pcall(CallPacked, setter, args)
-    local values
-    if ok and type(reader) == "function" then
-        values = Pack(reader(spec, spec.key))
-    end
+    local ok, valuesOrError = pcall(function()
+        CallPacked(setter, args)
+        if type(reader) == "function" then
+            return Pack(reader(spec, spec.key))
+        end
+        return nil
+    end)
     RestoreMutationSections(records)
 
     if not ok then
         if Log and Log.Warn then
-            Log:Warn("Mover preview failed for " .. tostring(spec and spec.key) .. ": " .. tostring(err))
+            Log:Warn("Mover preview failed for " .. tostring(spec and spec.key) .. ": " .. tostring(valuesOrError))
         end
         return false
     end
 
-    if values then
-        return true, unpackValues(values, 1, values.n)
+    if valuesOrError then
+        return true, unpackValues(valuesOrError, 1, valuesOrError.n)
     end
     return true
 end
@@ -454,6 +462,10 @@ local function WrapTransactionalMutators(spec)
 
     return spec
 end
+
+-- -----------------------------
+-- Public API
+-- -----------------------------
 
 local function NormalizeRegistrationSpec(key, label, spec)
     local normalized = {}
@@ -609,14 +621,38 @@ function Movers:ResetPositions()
     end
 
     self:ClearActiveInteraction()
-    local changed = Settings:SetTx(
-        MOVERS_APPLY_KEY,
-        { "positions" },
-        DeepCopy(defaults),
-        nil,
-        PANEL_KEY
-    )
-    if changed == true then
+
+    local keys = {}
+    for key in pairs(current) do keys[key] = true end
+    for key in pairs(defaults) do keys[key] = true end
+
+    local began = type(Settings.BeginPanelUndoBatch) == "function"
+        and Settings:BeginPanelUndoBatch(PANEL_KEY) == true
+        or false
+    local changed = false
+    local ok, err = pcall(function()
+        for key in pairs(keys) do
+            local value = defaults[key] ~= nil and DeepCopy(defaults[key]) or nil
+            if not DeepEqual(current[key], value) then
+                changed = Settings:SetTx(
+                    MOVERS_APPLY_KEY,
+                    { "positions", key },
+                    value,
+                    nil,
+                    PANEL_KEY
+                ) == true or changed
+            end
+        end
+    end)
+    if began and type(Settings.EndPanelUndoBatch) == "function" then
+        Settings:EndPanelUndoBatch(PANEL_KEY)
+    end
+    if not ok then
+        Log:Warn("Reset Positions transaction failed: " .. tostring(err))
+        return false
+    end
+
+    if changed then
         RequestApplyForKeys(MOVERS_APPLY_KEY, "reset positions")
         Log:Info("Positions reset to defaults")
         return true
@@ -747,6 +783,7 @@ function Movers:RefreshEditorSettings()
     end
 end
 
+-- Rebuild grid on resize/scale changes (only while unlocked)
 local gridEvents = CreateFrame("Frame")
 gridEvents:RegisterEvent("DISPLAY_SIZE_CHANGED")
 gridEvents:RegisterEvent("UI_SCALE_CHANGED")

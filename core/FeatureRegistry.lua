@@ -180,6 +180,7 @@ local PANEL_CONTRACTS = Registry.PANEL_CONTRACTS or {
         categoryId = "FGUI_EDIT",
         title = "Edit Mode",
         applyKeys = "movers",
+        restoreApplyKeys = { "movers", "unitframes", "center", "experience", "actionbars", "companion" },
         resetLabel = "Reset Edit Mode",
         resetSections = { "movers", "editor" },
         contextSections = {

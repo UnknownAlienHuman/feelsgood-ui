@@ -35,6 +35,7 @@ local function BuildPanel_EditMode()
     local PANEL_KEY = "editmode"
     local panelContract = (type(GetPanelContract) == "function") and GetPanelContract(PANEL_KEY) or nil
     local APPLY_KEYS = (panelContract and panelContract.applyKeys) or "movers"
+    local UNDO_APPLY_KEYS = (panelContract and panelContract.restoreApplyKeys) or APPLY_KEYS
     local RESET_SECTIONS = (panelContract and panelContract.resetSections) or { "movers", "editor" }
 
     local Refresh
@@ -169,15 +170,19 @@ local function BuildPanel_EditMode()
 
     undoBtn:SetScript("OnClick", function()
         if PanelTransactions and type(PanelTransactions.UndoPanel) == "function" then
-            if PanelTransactions:UndoPanel(PANEL_KEY, APPLY_KEYS, { onRollback = RefreshPanel }) then
-                RequestMoverApply()
+            if PanelTransactions:UndoPanel(PANEL_KEY, UNDO_APPLY_KEYS, { onRollback = RefreshPanel }) then
+                if Apply and type(Apply.Request) == "function" then
+                    Apply:Request(UNDO_APPLY_KEYS)
+                end
                 RefreshPanel()
             end
             return
         end
 
         if Settings and Settings.UndoPanel and Settings:UndoPanel(PANEL_KEY) then
-            RequestMoverApply()
+            if Apply and type(Apply.Request) == "function" then
+                Apply:Request(UNDO_APPLY_KEYS)
+            end
             RefreshPanel()
         end
     end)
