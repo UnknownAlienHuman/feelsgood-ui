@@ -103,10 +103,10 @@ try {
     }
 
     assertBefore(tocEntries, 'core/Secret.lua', 'core/Utils.lua');
-    assertBefore(tocEntries, 'modules/UnitFramesRender.lua', 'modules/UnitFramesRestricted.lua');
-    assertBefore(tocEntries, 'modules/UnitFramesRestricted.lua', 'modules/UnitFramesPolicy.lua');
-    assertBefore(tocEntries, 'modules/CenterBarsRender.lua', 'modules/CenterBarsRestricted.lua');
-    assertBefore(tocEntries, 'modules/CenterBarsRestricted.lua', 'modules/CenterBars.lua');
+    assertBefore(tocEntries, 'modules/UnitFramesTarget.lua', 'modules/UnitFramesRender.lua');
+    assertBefore(tocEntries, 'modules/UnitFramesRender.lua', 'modules/UnitFramesPolicy.lua');
+    assertBefore(tocEntries, 'modules/CenterBarsRuntime.lua', 'modules/CenterBarsRender.lua');
+    assertBefore(tocEntries, 'modules/CenterBarsRender.lua', 'modules/CenterBars.lua');
 
     if (errors.length > 0) {
         for (const error of errors) console.error(error);
