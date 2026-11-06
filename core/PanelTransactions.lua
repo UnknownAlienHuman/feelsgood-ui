@@ -91,8 +91,12 @@ local function NormalizeSections(sections)
     return out
 end
 
-local function GetPanelSections(panelKey, explicitSections)
+local function GetPanelSections(panelKey, explicitSections, includeContract)
     local out = NormalizeSections(explicitSections)
+    if includeContract ~= true then
+        return out
+    end
+
     local seen = {}
     for i = 1, #out do
         seen[out[i]] = true
@@ -126,13 +130,44 @@ local function GetPanelSections(panelKey, explicitSections)
     return out
 end
 
-local function SnapshotSections(panelKey, explicitSections)
+local function GetUndoSections(panelKey)
+    if not Settings or type(Settings._undoPanels) ~= "table" then
+        return nil
+    end
+
+    local stack = Settings._undoPanels[panelKey]
+    local entry = type(stack) == "table" and stack[#stack] or nil
+    if type(entry) ~= "table" then
+        return nil
+    end
+
+    local sections, seen = {}, {}
+    local function AddPath(path)
+        local section = type(path) == "table" and path[1] or nil
+        if type(section) == "string" and section ~= "" and not seen[section] then
+            seen[section] = true
+            sections[#sections + 1] = section
+        end
+    end
+
+    if type(entry.changes) == "table" then
+        for i = 1, #entry.changes do
+            AddPath(entry.changes[i] and entry.changes[i].path)
+        end
+    else
+        AddPath(entry.path)
+    end
+
+    return #sections > 0 and sections or nil
+end
+
+local function SnapshotSections(panelKey, explicitSections, includeContract)
     local profile = GetProfile()
     if type(profile) ~= "table" then
         return nil
     end
 
-    local sections = GetPanelSections(panelKey, explicitSections)
+    local sections = GetPanelSections(panelKey, explicitSections, includeContract)
     if #sections == 0 then
         return nil
     end
@@ -213,26 +248,30 @@ local function RestorePanelHistory(snapshot)
     return true
 end
 
+local function RemoveTransactionFromKey(transaction, key)
+    local list = PanelTransactions._pendingByKey[key]
+    if type(list) ~= "table" then
+        return
+    end
+
+    for index = #list, 1, -1 do
+        if list[index] == transaction then
+            table.remove(list, index)
+        end
+    end
+    if #list == 0 then
+        PanelTransactions._pendingByKey[key] = nil
+    end
+end
+
 local function RemoveTransaction(transaction)
-    local pendingByKey = PanelTransactions._pendingByKey
     local keys = transaction and transaction.keys or nil
     if type(keys) ~= "table" then
         return
     end
 
     for i = 1, #keys do
-        local key = keys[i]
-        local list = pendingByKey[key]
-        if type(list) == "table" then
-            for index = #list, 1, -1 do
-                if list[index] == transaction then
-                    table.remove(list, index)
-                end
-            end
-            if #list == 0 then
-                pendingByKey[key] = nil
-            end
-        end
+        RemoveTransactionFromKey(transaction, keys[i])
     end
 end
 
@@ -303,7 +342,11 @@ function PanelTransactions:CommitKeys(keys)
     for i = 1, #transactions do
         local transaction = transactions[i]
         for j = 1, #normalizedKeys do
-            transaction.remaining[normalizedKeys[j]] = nil
+            local key = normalizedKeys[j]
+            if transaction.remaining[key] then
+                transaction.remaining[key] = nil
+                RemoveTransactionFromKey(transaction, key)
+            end
         end
         if not transaction.finalized and next(transaction.remaining) == nil then
             finalized[#finalized + 1] = transaction
@@ -369,7 +412,12 @@ function PanelTransactions:UndoPanel(panelKey, applyKeys, callbacks)
         return OriginalUndoPanel(Settings, panelKey)
     end
 
-    local sections = SnapshotSections(panelKey)
+    local undoSections = GetUndoSections(panelKey)
+    if type(undoSections) ~= "table" then
+        undoSections = GetPanelSections(panelKey, nil, true)
+    end
+
+    local sections = SnapshotSections(panelKey, undoSections, false)
     local history = SnapshotPanelHistory(panelKey)
     if type(sections) ~= "table" or type(history) ~= "table" then
         return false
@@ -407,7 +455,7 @@ function PanelTransactions:ResetSections(panelKey, sections, applyKeys, callback
         return Settings:ResetSections(sections)
     end
 
-    local sectionSnapshot = SnapshotSections(panelKey, sections)
+    local sectionSnapshot = SnapshotSections(panelKey, sections, false)
     local historySnapshot = SnapshotPanelHistory(panelKey)
     if type(sectionSnapshot) ~= "table" or type(historySnapshot) ~= "table" then
         return false
