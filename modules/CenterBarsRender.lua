@@ -105,16 +105,23 @@ local function GetDKSpecColor()
     return Call("GetDKSpecColor")
 end
 
-local function IsSecret(v)
-    return (Secret and Secret.IsSecret and Secret.IsSecret(v)) == true
+local function CanInspect(v)
+    if Secret and Secret.CanAccess then
+        return Secret.CanAccess(v)
+    end
+    if Secret and Secret.IsSecret then
+        return not Secret.IsSecret(v)
+    end
+    return true
 end
 
 local function TryNumber(v)
     if U and U.TryNumber then
         return U.TryNumber(v)
     end
-    if type(v) ~= "number" then return false, nil end
-    if IsSecret(v) then return false, nil end
+    if not CanInspect(v) or type(v) ~= "number" then
+        return false, nil
+    end
     return true, v
 end
 
@@ -126,20 +133,19 @@ local function IsPlainNumber(x)
     return ok == true
 end
 
-local function CanAccessValue(v)
-    if Secret and Secret.CanAccess then
-        return Secret.CanAccess(v)
-    end
-    return true
-end
-
 local function SafeSetText(fs, v)
     if not fs then return end
     if Secret and Secret.SafeSetText then
         Secret.SafeSetText(fs, v)
         return
     end
-    pcall(fs.SetText, fs, v or "")
+    if not CanInspect(v) then
+        fs:SetText(v)
+    elseif v == nil then
+        fs:SetText("")
+    else
+        fs:SetText(v)
+    end
 end
 
 local function SafeClamp01(x)
@@ -159,6 +165,9 @@ local function TruncateWhenZero(v)
     if Secret and Secret.TruncateWhenZero then
         return Secret.TruncateWhenZero(v)
     end
+    if not CanInspect(v) then
+        return v
+    end
     if _G.C_StringUtil and _G.C_StringUtil.TruncateWhenZero then
         return _G.C_StringUtil.TruncateWhenZero(v)
     end
@@ -169,18 +178,15 @@ local function TruncateWhenZero(v)
 end
 
 local function TryAbbreviateNumbers(v)
-    if type(_G.AbbreviateNumbers) ~= "function" then
+    if not CanInspect(v) or type(_G.AbbreviateNumbers) ~= "function" then
         return nil
     end
-    local ok, s = pcall(_G.AbbreviateNumbers, v)
-    if not ok then
+
+    local ok, value = pcall(_G.AbbreviateNumbers, v)
+    if not ok or not CanInspect(value) or value == nil then
         return nil
     end
-    local okNil, isNil = pcall(function() return s == nil end)
-    if okNil and isNil then
-        return nil
-    end
-    return s
+    return value
 end
 
 local function FormatPowerValueText(v, shortCfg)
@@ -199,16 +205,9 @@ local function FormatPowerValueText(v, shortCfg)
 
         local abbrev = TryAbbreviateNumbers(v)
         if abbrev ~= nil then
-            if IsSecret(abbrev) or not CanAccessValue(abbrev) then
-                return abbrev
-            end
             if sn.suffixCase ~= "upper" and type(abbrev) == "string" then
-                local okG, out = pcall(function()
-                    return (abbrev:gsub("K", "k"):gsub("M", "m"):gsub("B", "b"))
-                end)
-                if okG and type(out) == "string" then
-                    return out
-                end
+                local normalized = abbrev:gsub("K", "k"):gsub("M", "m"):gsub("B", "b")
+                return normalized
             end
             return abbrev
         end
@@ -232,15 +231,15 @@ local function FormatPowerValueText(v, shortCfg)
 end
 
 local function GetPowerColor(token)
-    if token == nil or IsSecret(token) then
+    if not CanInspect(token) or token == nil then
         return 0.25, 0.55, 1
     end
     local tbl = _G.PowerBarColor
     if not tbl then return 0.25, 0.55, 1 end
 
-    local t = tbl[token]
-    if t and IsPlainNumber(t.r) and IsPlainNumber(t.g) and IsPlainNumber(t.b) then
-        return t.r, t.g, t.b
+    local color = tbl[token]
+    if color and IsPlainNumber(color.r) and IsPlainNumber(color.g) and IsPlainNumber(color.b) then
+        return color.r, color.g, color.b
     end
     return 0.25, 0.55, 1
 end
@@ -292,7 +291,7 @@ local function LayoutSegments(container, segments, count, totalWidth, height, ga
     gap = (IsPlainNumber(gap) and gap) or 2
     count = (IsPlainNumber(count) and count) or 0
 
-    for i, seg in ipairs(segments) do
+    for _, seg in ipairs(segments) do
         seg:Hide()
         seg:ClearAllPoints()
     end
@@ -580,12 +579,64 @@ function Render.StopRuneTicker(owner)
     owner._runeTickerDelay = nil
 end
 
+local function ResetPowerUnavailable(owner)
+    owner._powerLastMax = nil
+    owner.powerBar._fguiValue = 0
+    owner.powerBar:SetMinMaxValues(0, 1)
+    owner.powerBar:SetValue(0)
+    SetStatusBarColorIfChanged(owner.powerBar, 0.25, 0.55, 1, 1)
+    SetSparkVisible(owner.powerBar, false)
+    if owner.powerBar.text then
+        owner.powerBar.text:SetText("")
+    end
+end
+
 function Render.UpdatePower(owner)
     if not owner.frame or not owner.powerBar then return end
 
     local powerType, powerToken = UnitPowerType("player")
+    if not CanInspect(powerType) or not CanInspect(powerToken) then
+        ResetPowerUnavailable(owner)
+        return
+    end
+
     local cur = UnitPower("player", powerType)
     local max = UnitPowerMax("player", powerType)
+    local curAccessible = CanInspect(cur)
+    local maxAccessible = CanInspect(max)
+
+    if not curAccessible or not maxAccessible then
+        owner._powerLastMax = nil
+        owner.powerBar._fguiValue = nil
+
+        if maxAccessible then
+            owner.powerBar:SetMinMaxValues(0, max or 1)
+        else
+            owner.powerBar:SetMinMaxValues(0, max)
+        end
+
+        if curAccessible then
+            owner.powerBar:SetValue(cur or 0)
+        else
+            owner.powerBar:SetValue(cur)
+        end
+
+        SetStatusBarColorIfChanged(owner.powerBar, 0.25, 0.55, 1, 1)
+        SetSparkVisible(owner.powerBar, false)
+
+        if owner.powerBar.text then
+            if owner._showPowerText == true then
+                if curAccessible then
+                    SafeSetText(owner.powerBar.text, FormatPowerValueText(cur, owner._shortCfg))
+                else
+                    SafeSetText(owner.powerBar.text, cur)
+                end
+            else
+                owner.powerBar.text:SetText("")
+            end
+        end
+        return
+    end
 
     if max ~= nil then
         local okMaxNum, maxNum = TryNumber(max)
@@ -725,12 +776,55 @@ function Render.UpdateComboPoints(owner)
     return Render.UpdatePointResource(owner)
 end
 
+local function ClearRuneSamples(samples)
+    for i = 1, #samples do
+        local sample = samples[i]
+        sample.start = nil
+        sample.duration = nil
+        sample.ready = nil
+    end
+end
+
+local function ShowUnavailableRunes(owner, show)
+    for i = 1, show do
+        local seg = owner.resourceSegments[i]
+        if seg then
+            SetStatusBarValueIfChanged(seg, 0)
+            SetStatusBarColorIfChanged(seg, 0.25, 0.55, 1, 1)
+            SetSparkVisible(seg, false)
+            seg:Show()
+        end
+    end
+    Render.StopRuneTicker(owner)
+end
+
 function Render.UpdateRunes(owner)
     if not owner.resourceBar or not owner.resourceSegments then return end
 
     local show = 6
     Render.EnsureSegmentPool(owner, show, owner._resourceHeight or 12)
     Render.EnsureResourceLayout(owner, show, owner._centerWidth or 560, owner._resourceHeight or 12, owner._resourceGap or 2)
+
+    owner._runeSamples = owner._runeSamples or {}
+    local samples = owner._runeSamples
+
+    for i = 1, show do
+        local start, duration, ready = GetRuneCooldown(i)
+        if not CanInspect(start) or not CanInspect(duration) or not CanInspect(ready) then
+            ClearRuneSamples(samples)
+            ShowUnavailableRunes(owner, show)
+            return
+        end
+
+        local sample = samples[i]
+        if not sample then
+            sample = {}
+            samples[i] = sample
+        end
+        sample.start = start
+        sample.duration = duration
+        sample.ready = ready
+    end
 
     local anyRecharging = false
     local nextDelay = nil
@@ -746,10 +840,13 @@ function Render.UpdateRunes(owner)
     local lastActive = nil
     for i = 1, show do
         local seg = owner.resourceSegments[i]
-        local start, duration, ready = GetRuneCooldown(i)
+        local sample = samples[i]
+        local start = sample.start
+        local duration = sample.duration
+        local ready = sample.ready
 
         local readyPlain = nil
-        if type(ready) == "boolean" and not IsSecret(ready) then
+        if type(ready) == "boolean" then
             readyPlain = ready
         end
 
@@ -757,18 +854,14 @@ function Render.UpdateRunes(owner)
         local value = 0
         if readyPlain == true or (durationPlain ~= nil and durationPlain == 0) then
             value = 1
-        else
-            if IsPlainNumber(start) and durationPlain and durationPlain > 0 then
-                anyRecharging = true
-                local elapsed = now - start
-                local remaining = durationPlain - elapsed
-                if remaining > 0 then
-                    if nextDelay == nil or remaining < nextDelay then
-                        nextDelay = remaining
-                    end
-                end
-                value = SafeClamp01(SafeDiv(elapsed, durationPlain))
+        elseif IsPlainNumber(start) and durationPlain and durationPlain > 0 then
+            anyRecharging = true
+            local elapsed = now - start
+            local remaining = durationPlain - elapsed
+            if remaining > 0 and (nextDelay == nil or remaining < nextDelay) then
+                nextDelay = remaining
             end
+            value = SafeClamp01(SafeDiv(elapsed, durationPlain))
         end
 
         SetStatusBarValueIfChanged(seg, value)
@@ -781,10 +874,7 @@ function Render.UpdateRunes(owner)
         end
     end
 
-    local ratio = nil
-    if show > 0 then
-        ratio = SafeClamp01(totalFill / show)
-    end
+    local ratio = SafeClamp01(totalFill / show)
     local low = Render.IsThresholdActive(owner, ratio)
     r, g, b = SelectThresholdColor(owner, low, r, g, b, 1)
 
@@ -925,6 +1015,9 @@ function Render.RefreshResourceMode(owner)
     if not owner.frame then return end
 
     local _, class = UnitClass("player")
+    if not CanInspect(class) then
+        class = nil
+    end
     local center = GetCenterCfg()
 
     owner.resourceMode = "NONE"
@@ -936,7 +1029,7 @@ function Render.RefreshResourceMode(owner)
 
     local showClassBar = (center.showClassBar ~= false)
     local defs = GetResourceDefs()
-    local def = showClassBar and defs[class] or nil
+    local def = showClassBar and class and defs[class] or nil
     if def then
         if def.kind == "RUNES" then
             owner.resourceMode = "RUNES"

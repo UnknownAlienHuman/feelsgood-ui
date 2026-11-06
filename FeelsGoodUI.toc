@@ -2,7 +2,7 @@
 ## Title: FeelsGoodUI
 ## Notes: Minimalist oUF-based unitframes + custom secure action bars.
 ## Author: Neomorph
-## Version: 0.0.42
+## Version: 0.0.43
 ## SavedVariables: FeelsGoodUIDB
 ## RequiredDeps: oUF
 
@@ -59,13 +59,11 @@ core/App.lua
 modules/UnitFramesText.lua
 modules/UnitFramesTarget.lua
 modules/UnitFramesRender.lua
-modules/UnitFramesRestricted.lua
 modules/UnitFramesPolicy.lua
 modules/UnitFramesRuntime.lua
 modules/UnitFrames.lua
 modules/CenterBarsRuntime.lua
 modules/CenterBarsRender.lua
-modules/CenterBarsRestricted.lua
 modules/CenterBars.lua
 modules/ActionBarsEditMode.lua
 modules/ActionBarsBlizzardShell.lua
