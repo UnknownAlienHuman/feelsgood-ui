@@ -13,6 +13,9 @@ local Text = ns.UnitFramesText
 local U = ns.U
 
 local EMPTY = {}
+local AURA_SOURCE_FIELDS = { "sourceUnit", "unitCaster", "caster", "source" }
+local AURA_BOOLEAN_FIELDS = { "isFromPlayerOrPlayerPet", "isCastByPlayer" }
+local AURA_UNIT_FIELDS = { "sourceUnit", "unitCaster" }
 
 local combatStartTime = nil
 local combatTicker = nil
@@ -84,11 +87,25 @@ local function GetSharedStatusbarToken()
     return Call("GetSharedStatusbarToken") or "Interface/Buttons/WHITE8x8"
 end
 
-local function IsSecretValue(v)
-    if Text and Text.IsSecretValue then
-        return Text.IsSecretValue(v)
+local function CanInspect(v)
+    if Secret and Secret.CanAccess then
+        return Secret.CanAccess(v)
     end
-    return false
+    if Text and Text.IsSecretValue then
+        return Text.IsSecretValue(v) ~= true
+    end
+    return true
+end
+
+local function CanInspectTable(v)
+    if Secret and Secret.CanInspectTable then
+        return Secret.CanInspectTable(v)
+    end
+    return CanInspect(v) and type(v) == "table"
+end
+
+local function IsSecretValue(v)
+    return not CanInspect(v)
 end
 
 local function SafeSetText(fs, v)
@@ -97,8 +114,15 @@ local function SafeSetText(fs, v)
         return
     end
 
-    if fs then
-        fs:SetText(v or "")
+    if not fs then
+        return
+    end
+    if not CanInspect(v) then
+        fs:SetText(v)
+    elseif v == nil then
+        fs:SetText("")
+    else
+        fs:SetText(v)
     end
 end
 
@@ -107,14 +131,7 @@ local function FormatNumberShort(v)
     if Text and Text.FormatNumberShort then
         return Text.FormatNumberShort(GetCache(), v)
     end
-    return ""
-end
-
-local function TryBlizzardAbbrev(v)
-    if Text and Text.TryBlizzardAbbrev then
-        return Text.TryBlizzardAbbrev(v)
-    end
-    return false, nil
+    return nil
 end
 
 local function FormatNumberFull(v)
@@ -124,7 +141,10 @@ local function FormatNumberFull(v)
     return nil
 end
 
-local function ShouldShortenUnit(unit)
+local function ShouldShortenUnit(unit, value)
+    if not CanInspect(value) then
+        return false
+    end
     EnsureCache()
     if Text and Text.ShouldShortenUnit then
         return Text.ShouldShortenUnit(GetCache(), unit)
@@ -318,11 +338,7 @@ local function UpdatePlayerLowHPGlow(frame, unit, value, maxv)
 end
 
 local function ParseLooseNumber(v)
-    if v == nil then
-        return nil
-    end
-
-    if Secret and Secret.IsSecret and Secret.IsSecret(v) then
+    if not CanInspect(v) or v == nil then
         return nil
     end
 
@@ -332,28 +348,16 @@ local function ParseLooseNumber(v)
     end
 
     if type(v) ~= "string" then
-        local okString, text = pcall(tostring, v)
-        if not okString or type(text) ~= "string" then
-            return nil
-        end
-        v = text
+        v = tostring(v)
     end
 
-    local okClean, clean = pcall(string.gsub, v, ",", ".")
-    if not okClean or type(clean) ~= "string" then
-        return nil
-    end
-
+    local clean = v:gsub(",", ".")
     local parsed = tonumber(clean)
     if type(parsed) == "number" then
         return parsed
     end
 
-    local okMatch, match = pcall(string.match, clean, "[-+]?%d+%.?%d*")
-    if not okMatch then
-        return nil
-    end
-
+    local match = clean:match("[-+]?%d+%.?%d*")
     if type(match) == "string" then
         return tonumber(match)
     end
@@ -380,40 +384,29 @@ local function PostUpdateHealth(health, unit, cur, minOrMax, maybeMax)
 
     local value = cur
     local maxv = maybeMax
-    if (not IsSecretValue(maxv)) and (not maxv) then
+    if CanInspect(maxv) and maxv == nil then
         maxv = minOrMax
     end
 
-    local shorten = ShouldShortenUnit(unit)
+    local shorten = ShouldShortenUnit(unit, value)
     if frame.HealthValueText then
         local okValue = U.TryNumber(value)
         if okValue then
             if shorten then
-                SafeSetText(frame.HealthValueText, FormatNumberShort(value))
+                SafeSetText(frame.HealthValueText, FormatNumberShort(value) or "")
             else
                 SafeSetText(frame.HealthValueText, FormatNumberFull(value) or "")
             end
-        else
-            local looseShort = nil
-            if shorten then
-                local looseNumber = ParseLooseNumber(value)
-                if type(looseNumber) == "number" then
-                    looseShort = FormatNumberShort(looseNumber)
-                end
-            end
-
+        elseif shorten then
+            local looseNumber = ParseLooseNumber(value)
+            local looseShort = type(looseNumber) == "number" and FormatNumberShort(looseNumber) or nil
             if type(looseShort) == "string" and looseShort ~= "" then
                 SafeSetText(frame.HealthValueText, looseShort)
-            elseif shorten and IsSecretValue(value) then
-                local hasAbbrev, abbrev = TryBlizzardAbbrev(value)
-                if hasAbbrev then
-                    SafeSetText(frame.HealthValueText, abbrev)
-                else
-                    SafeSetText(frame.HealthValueText, value)
-                end
             else
                 SafeSetText(frame.HealthValueText, value)
             end
+        else
+            SafeSetText(frame.HealthValueText, value)
         end
     end
 
@@ -421,30 +414,10 @@ local function PostUpdateHealth(health, unit, cur, minOrMax, maybeMax)
         local direct = SafeUnitHealthPercent(unit)
         local okDirect, directNumber = U.TryNumber(direct)
         if okDirect then
-            local percentText = FormatPercentText(directNumber)
-            if percentText ~= "" then
-                SafeSetText(frame.HealthPercentText, percentText)
-            else
-                local rendered = false
-                if Secret and Secret.SafeSetFormattedText then
-                    Secret.SafeSetFormattedText(frame.HealthPercentText, "%s%%", directNumber)
-                    local text = frame.HealthPercentText:GetText()
-                    rendered = (type(text) == "string" and text ~= "")
-                end
-                if not rendered then
-                    SafeSetText(frame.HealthPercentText, directNumber)
-                end
-            end
-        elseif IsSecretValue(direct) then
-            local rendered = false
-            if Secret and Secret.SafeSetFormattedText then
-                Secret.SafeSetFormattedText(frame.HealthPercentText, "%s%%", direct)
-                local text = frame.HealthPercentText:GetText()
-                rendered = (type(text) == "string" and text ~= "")
-            end
-            if not rendered then
-                SafeSetText(frame.HealthPercentText, direct)
-            end
+            SafeSetText(frame.HealthPercentText, FormatPercentText(directNumber))
+        elseif not CanInspect(direct) then
+            -- Direct one-way sink only. Do not format or read back opaque text.
+            SafeSetText(frame.HealthPercentText, direct)
         else
             local okCur, curNumber = U.TryNumber(value)
             local okMax, maxNumber = U.TryNumber(maxv)
@@ -457,7 +430,7 @@ local function PostUpdateHealth(health, unit, cur, minOrMax, maybeMax)
         end
     end
 
-    if frame.NameText then
+    if frame.NameText and type(_G.UnitName) == "function" then
         local okName, name = pcall(_G.UnitName, unit)
         if okName then
             SafeSetText(frame.NameText, name)
@@ -477,7 +450,7 @@ function Render.ForceUpdateHealthText(frame, unit)
     end
 
     local okExists, exists = pcall(_G.UnitExists, unit)
-    if not okExists or not exists then
+    if not okExists or not CanInspect(exists) or exists ~= true then
         return
     end
 
@@ -486,7 +459,7 @@ function Render.ForceUpdateHealthText(frame, unit)
     if not okCur then cur = nil end
     if not okMax then maxv = nil end
 
-    pcall(PostUpdateHealth, frame.Health, unit, cur, maxv)
+    PostUpdateHealth(frame.Health, unit, cur, maxv)
 end
 
 local function Aura_PostCreateIcon(icons, button)
@@ -515,41 +488,72 @@ local function Aura_PostCreateIcon(icons, button)
     Media:CreateBorder(button, cache.borderSize or 1)
 end
 
-local function Aura_PostUpdateIcon(icons, unit, button)
-    if not button then
-        return
+local function Aura_IsFromPlayerOrPet(sourceUnit, auraData)
+    if not CanInspect(sourceUnit) then
+        return nil
     end
-
-    EnsureCache()
-    if button.icon then
-        Media:ApplyIconCrop(button.icon, GetCache().iconInset or 0.08)
-    end
-end
-
-local function Aura_IsFromPlayerOrPet(sourceUnit, auraData, ...)
     if sourceUnit == "player" or sourceUnit == "pet" or sourceUnit == "vehicle" then
         return true
     end
 
-    if type(auraData) == "table" then
-        if auraData.isFromPlayerOrPlayerPet == true then return true end
-        if auraData.isCastByPlayer == true then return true end
-        if auraData.sourceUnit == "player" or auraData.sourceUnit == "pet" then return true end
-        if auraData.unitCaster == "player" or auraData.unitCaster == "pet" then return true end
-        return false
+    if not CanInspect(auraData) or auraData == nil then
+        return nil
+    end
+    if not CanInspectTable(auraData) then
+        return nil
     end
 
-    return nil
+    for i = 1, #AURA_BOOLEAN_FIELDS do
+        local value = auraData[AURA_BOOLEAN_FIELDS[i]]
+        if not CanInspect(value) then
+            return nil
+        end
+        if value == true then
+            return true
+        end
+    end
+
+    for i = 1, #AURA_UNIT_FIELDS do
+        local value = auraData[AURA_UNIT_FIELDS[i]]
+        if not CanInspect(value) then
+            return nil
+        end
+        if value == "player" or value == "pet" then
+            return true
+        end
+    end
+
+    return false
 end
 
 local function Aura_ExtractSourceUnit(...)
     local first = ...
+    if not CanInspect(first) then
+        return nil, nil
+    end
+
     if type(first) == "table" then
-        return first.sourceUnit or first.unitCaster or first.caster or first.source, first
+        if not CanInspectTable(first) then
+            return nil, nil
+        end
+
+        for i = 1, #AURA_SOURCE_FIELDS do
+            local value = first[AURA_SOURCE_FIELDS[i]]
+            if not CanInspect(value) then
+                return nil, first
+            end
+            if type(value) == "string" then
+                return value, first
+            end
+        end
+        return nil, first
     end
 
     for i = 7, 12 do
         local value = select(i, ...)
+        if not CanInspect(value) then
+            return nil, nil
+        end
         if type(value) == "string" then
             return value, nil
         end
@@ -607,7 +611,6 @@ local function CreateAuraContainer(frame, size, spacing, max, growthY, filter)
 
     auras:SetSize((size * max) + (spacing * (max - 1)), size)
     auras.PostCreateIcon = Aura_PostCreateIcon
-    auras.PostUpdateIcon = Aura_PostUpdateIcon
 
     return auras
 end
@@ -682,18 +685,27 @@ local function CreateHealthBar(frame)
     return health
 end
 
-local function PostUpdatePower(power, unit, cur, minOrMax, maybeMax)
+local function PostUpdatePower(power, unit)
     local frame = power and power.__owner
     if not frame or not unit then
         return
     end
 
-    local powerType, powerToken = UnitPowerType(unit)
-    if powerToken and (not IsSecretValue(powerToken)) and _G.PowerBarColor and _G.PowerBarColor[powerToken] then
-        local color = _G.PowerBarColor[powerToken]
-        if color and type(color.r) == "number" then
-            SetStatusBarColorSafe(power, color.r, color.g, color.b, 1)
-        end
+    local _, powerToken = UnitPowerType(unit)
+    if not CanInspect(powerToken) then
+        SetStatusBarColorSafe(power, 0.25, 0.55, 1, 1)
+        return
+    end
+    if powerToken == nil or not _G.PowerBarColor then
+        return
+    end
+
+    local color = _G.PowerBarColor[powerToken]
+    if type(color) == "table"
+        and type(color.r) == "number"
+        and type(color.g) == "number"
+        and type(color.b) == "number" then
+        SetStatusBarColorSafe(power, color.r, color.g, color.b, 1)
     end
 end
 
@@ -748,7 +760,7 @@ local function CreateCastbar(frame)
     Media:ApplyFont(castbar.Text, font, textCfg.size or 12, textCfg.outline or "OUTLINE")
     Media:ApplyFont(castbar.Time, font, textCfg.size or 12, textCfg.outline or "OUTLINE")
 
-    castbar.PostCastStart = function(activeCastbar, unit)
+    castbar.PostCastStart = function(activeCastbar)
         SetStatusBarColorSafe(activeCastbar, 0.9, 0.7, 0.1, 1)
     end
     castbar.PostChannelStart = castbar.PostCastStart
