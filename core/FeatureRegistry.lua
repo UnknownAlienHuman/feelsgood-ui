@@ -106,21 +106,26 @@ local APPLY_CONTRACTS = Registry.APPLY_CONTRACTS or {
     runtime = {
         handler = function()
             local db = ns.DB
-            if db and type(db.ApplyRuntime) == "function" then
-                db:ApplyRuntime()
+            if not (db and type(db.ApplyRuntime) == "function") then
+                return false, "DB.ApplyRuntime unavailable"
             end
+            return db:ApplyRuntime()
         end,
     },
     theme = {
         handler = function()
             local app = ns.App
-            if app and type(app.ApplyTheme) == "function" then
-                app:ApplyTheme()
+            if not (app and type(app.ApplyTheme) == "function") then
+                return false, "App.ApplyTheme unavailable"
             end
+            return app:ApplyTheme()
         end,
         deferInCombat = true,
     },
-    unitframes = { feature = "unitframes" },
+    unitframes = {
+        feature = "unitframes",
+        deferInCombat = true,
+    },
     center = { feature = "center" },
     experience = { feature = "experience" },
     actionbars = {
@@ -313,7 +318,7 @@ function Registry:GetApplySpec(applyKey)
     local method = contract.method or (featureContract and featureContract.applyMethod)
     if type(module) == "table" and type(method) == "string" and type(module[method]) == "function" then
         spec.handler = function()
-            module[method](module)
+            return module[method](module)
         end
         return spec
     end
