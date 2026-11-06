@@ -129,18 +129,26 @@ end
 
 local function FinalizePending(keys, method)
     if type(keys) ~= "table" or #keys == 0 then
-        return
+        return nil
     end
 
-    local panelTransactions = ns.PanelTransactions
-    local rollbackCallbacks = nil
-
-    -- Higher-level undo/reset snapshots must restore first. Settings path-level
-    -- rollback then reapplies older scalar values on top in exact write order.
+    local transactions = ns.PanelTransactions
     if method == "Rollback"
-        and panelTransactions
-        and type(panelTransactions.RollbackKeys) == "function" then
-        rollbackCallbacks = panelTransactions:RollbackKeys(keys)
+        and transactions
+        and type(transactions.RollbackKeys) == "function" then
+        -- PanelTransactions journals both scalar SetTx writes and higher-level
+        -- undo/reset snapshots in one sequence. Clear Settings' legacy pending
+        -- lists without replaying a second, differently ordered rollback.
+        local callbacks, committedKeys = transactions:RollbackKeys(keys)
+        if Settings and type(Settings.Commit) == "function" then
+            for i = 1, #keys do
+                Settings:Commit(keys[i])
+            end
+        end
+        if type(transactions.RunRollbackCallbacks) == "function" then
+            transactions:RunRollbackCallbacks(callbacks)
+        end
+        return committedKeys
     end
 
     if Settings and type(Settings[method]) == "function" then
@@ -153,14 +161,11 @@ local function FinalizePending(keys, method)
     end
 
     if method == "Commit"
-        and panelTransactions
-        and type(panelTransactions.CommitKeys) == "function" then
-        panelTransactions:CommitKeys(keys)
-    elseif method == "Rollback"
-        and panelTransactions
-        and type(panelTransactions.RunRollbackCallbacks) == "function" then
-        panelTransactions:RunRollbackCallbacks(rollbackCallbacks)
+        and transactions
+        and type(transactions.CommitKeys) == "function" then
+        transactions:CommitKeys(keys)
     end
+    return nil
 end
 
 local function CallFallback(object, method, key)
@@ -334,14 +339,15 @@ function Apply:Flush()
         return
     end
 
-    FinalizePending(batchKeys, "Rollback")
+    local previouslyCommittedKeys = FinalizePending(batchKeys, "Rollback")
 
-    local restoreKeys = {}
-    for i = 1, #appliedKeys do
-        restoreKeys[#restoreKeys + 1] = appliedKeys[i]
+    local restoreSet = {}
+    for i = 1, #appliedKeys do restoreSet[appliedKeys[i]] = true end
+    restoreSet[failedKey] = true
+    for i = 1, #(previouslyCommittedKeys or {}) do
+        restoreSet[previouslyCommittedKeys[i]] = true
     end
-    restoreKeys[#restoreKeys + 1] = failedKey
-    RestoreRuntimeKeys(restoreKeys)
+    RestoreRuntimeKeys(BuildOrderedKeys(restoreSet))
 
     if Log and Log.Error then
         Log:Error("Apply batch failed [" .. tostring(failedKey) .. "]: " .. tostring(failedErr))
