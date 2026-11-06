@@ -18,8 +18,6 @@ local function BuildPanel_General()
     local GetProfileSection = ctx.GetProfileSection
     local APPLY_KEY_THEME = ctx.APPLY_KEY_THEME
     local Media = ctx.Media
-    local Perf = ctx.Perf
-    local MinimapIcon = ctx.MinimapIcon
 
     local CreateBindingState = Shared.CreateBindingState
     local AddDescriptorBindings = Shared.AddDescriptorBindings
@@ -82,11 +80,7 @@ local function BuildPanel_General()
                 return value == true
             end,
             rule = { type = "boolean", fallback = false },
-            afterSet = function(checked)
-                if Perf and Perf.SetEnabled then
-                    Perf:SetEnabled(checked)
-                end
-            end,
+            applyKeys = "runtime",
         },
         {
             kind = "check",
@@ -102,11 +96,6 @@ local function BuildPanel_General()
             end,
             rule = { type = "boolean", fallback = false },
             applyKeys = "minimap",
-            afterSet = function(checked)
-                if MinimapIcon and MinimapIcon.SetHidden then
-                    MinimapIcon:SetHidden(not checked)
-                end
-            end,
         },
         {
             kind = "dropdown",
