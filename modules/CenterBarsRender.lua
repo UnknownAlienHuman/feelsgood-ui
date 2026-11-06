@@ -115,10 +115,6 @@ local function CanInspect(v)
     return true
 end
 
-local function IsSecret(v)
-    return not CanInspect(v)
-end
-
 local function TryNumber(v)
     if U and U.TryNumber then
         return U.TryNumber(v)
@@ -135,10 +131,6 @@ local function IsPlainNumber(x)
     end
     local ok = TryNumber(x)
     return ok == true
-end
-
-local function CanAccessValue(v)
-    return CanInspect(v)
 end
 
 local function SafeSetText(fs, v)
@@ -191,13 +183,7 @@ local function TryAbbreviateNumbers(v)
     end
 
     local ok, value = pcall(_G.AbbreviateNumbers, v)
-    if not ok then
-        return nil
-    end
-    if not CanInspect(value) then
-        return value
-    end
-    if value == nil then
+    if not ok or not CanInspect(value) or value == nil then
         return nil
     end
     return value
@@ -219,11 +205,9 @@ local function FormatPowerValueText(v, shortCfg)
 
         local abbrev = TryAbbreviateNumbers(v)
         if abbrev ~= nil then
-            if IsSecret(abbrev) then
-                return abbrev
-            end
             if sn.suffixCase ~= "upper" and type(abbrev) == "string" then
-                return abbrev:gsub("K", "k"):gsub("M", "m"):gsub("B", "b")
+                local normalized = abbrev:gsub("K", "k"):gsub("M", "m"):gsub("B", "b")
+                return normalized
             end
             return abbrev
         end
