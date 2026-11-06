@@ -11,7 +11,7 @@ local Safety = ns.Safety
 local Theme = ns.Theme
 local Shared = ns.CompanionShared
 
-local MICRO_LAYOUT_RETRY_KEY = "FGUI_COMPANION_MICRO_LAYOUT"
+local MICRO_LAYOUT_RETRY_KEY = Shared.MICRO_LAYOUT_RETRY_KEY
 local MICRO_LAYOUT_RETRY_DELAY = 0.05
 
 local function IsManagedModuleActive(module)
@@ -22,15 +22,9 @@ local function IsManagedModuleActive(module)
 end
 
 local function CancelRetryTimer()
-    if not (Safety and Safety._timers) then
-        return
+    if Safety and Safety.CancelDebounce then
+        Safety.CancelDebounce(MICRO_LAYOUT_RETRY_KEY)
     end
-
-    local timer = Safety._timers[MICRO_LAYOUT_RETRY_KEY]
-    if type(timer) == "table" and type(timer.Cancel) == "function" then
-        pcall(timer.Cancel, timer)
-    end
-    Safety._timers[MICRO_LAYOUT_RETRY_KEY] = nil
 end
 
 local function CreateMicroMenuMoverSpec()
