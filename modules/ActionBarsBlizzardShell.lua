@@ -35,6 +35,14 @@ ns._abPastebin = ns._abPastebin or CreateFrame("Frame")
 ns._abPastebin:Hide()
 local pastebin = ns._abPastebin
 
+local function IsDetached(module)
+    return type(module) == "table" and module._detached == true
+end
+
+local function HideKickKey(delay)
+    return "FGUI_AB_HIDE_" .. tostring(delay)
+end
+
 local function GetActionBarsCfg()
     if DB and DB.GetSection then
         return DB:GetSection("actionbars") or {}
@@ -95,7 +103,38 @@ local function RefreshManagedPositions()
     end
 end
 
+local function CancelHideKicks(module)
+    if type(module) == "table" then
+        module._hideKickGeneration = (module._hideKickGeneration or 0) + 1
+        module._pendingHide = nil
+    end
+
+    if Safety and type(Safety.CancelDebounce) == "function" then
+        for i = 1, #HIDE_KICK_DELAYS do
+            Safety.CancelDebounce(HideKickKey(HIDE_KICK_DELAYS[i]))
+        end
+    end
+
+    return type(module) == "table" and module._hideKickGeneration or 0
+end
+
+function Shell.CancelPendingWork(module)
+    CancelHideKicks(module)
+
+    if Safety and type(Safety.CancelDebounce) == "function" then
+        Safety.CancelDebounce(MANAGED_POSITIONS_REFRESH_KEY)
+    end
+
+    if type(module) == "table" then
+        module._pendingManagedPositionsRefresh = nil
+    end
+end
+
 function Shell.QueueManagedPositionsRefresh(module, immediate)
+    if IsDetached(module) then
+        return false
+    end
+
     if InCombat() then
         if type(module) == "table" then
             module._pendingManagedPositionsRefresh = true
@@ -103,22 +142,29 @@ function Shell.QueueManagedPositionsRefresh(module, immediate)
         return false
     end
 
-    if immediate == true then
+    local function Run()
+        if IsDetached(module) then
+            return
+        end
         RefreshManagedPositions()
+    end
+
+    if immediate == true then
+        Run()
         return true
     end
 
     if Safety and Safety.Debounce then
-        Safety.Debounce(MANAGED_POSITIONS_REFRESH_KEY, MANAGED_POSITIONS_REFRESH_DELAY, RefreshManagedPositions)
+        Safety.Debounce(MANAGED_POSITIONS_REFRESH_KEY, MANAGED_POSITIONS_REFRESH_DELAY, Run)
         return true
     end
 
     if C_Timer and C_Timer.After then
-        C_Timer.After(MANAGED_POSITIONS_REFRESH_DELAY, RefreshManagedPositions)
+        C_Timer.After(MANAGED_POSITIONS_REFRESH_DELAY, Run)
         return true
     end
 
-    RefreshManagedPositions()
+    Run()
     return true
 end
 
@@ -183,6 +229,10 @@ local function RestoreFrame(name, frame)
 end
 
 function Shell.HideBlizzardArt(module)
+    if IsDetached(module) then
+        return false
+    end
+
     for i = 1, #BLIZZARD_ART_FRAME_NAMES do
         local name = BLIZZARD_ART_FRAME_NAMES[i]
         SoftHide(name, _G[name])
@@ -194,6 +244,7 @@ function Shell.HideBlizzardArt(module)
     end
 
     Shell.QueueManagedPositionsRefresh(module)
+    return true
 end
 
 function Shell.RestoreBlizzardArt(module, barsCfg)
@@ -232,6 +283,11 @@ function Shell.RestoreBlizzardArt(module, barsCfg)
 end
 
 function Shell.KickHideBlizzardArt(module)
+    if IsDetached(module) then
+        return
+    end
+
+    local generation = CancelHideKicks(module)
     Shell.HideBlizzardArt(module)
 
     if InCombat() then
@@ -241,12 +297,20 @@ function Shell.KickHideBlizzardArt(module)
         return
     end
 
+    local function Rehide()
+        if IsDetached(module) then
+            return
+        end
+        if type(module) == "table" and module._hideKickGeneration ~= generation then
+            return
+        end
+        Shell.HideBlizzardArt(module)
+    end
+
     if Safety and Safety.Debounce then
         for i = 1, #HIDE_KICK_DELAYS do
             local delay = HIDE_KICK_DELAYS[i]
-            Safety.Debounce("FGUI_AB_HIDE_" .. tostring(delay), delay, function()
-                Shell.HideBlizzardArt(module)
-            end)
+            Safety.Debounce(HideKickKey(delay), delay, Rehide)
         end
         return
     end
@@ -256,10 +320,7 @@ function Shell.KickHideBlizzardArt(module)
     end
 
     for i = 1, #HIDE_KICK_DELAYS do
-        local delay = HIDE_KICK_DELAYS[i]
-        C_Timer.After(delay, function()
-            Shell.HideBlizzardArt(module)
-        end)
+        C_Timer.After(HIDE_KICK_DELAYS[i], Rehide)
     end
 end
 
@@ -354,6 +415,9 @@ function Shell.EnsureEndCapsHook(module)
     end
 
     local function Rehide()
+        if IsDetached(module) then
+            return
+        end
         if Shell.ShouldHideBlizzardArt() then
             Shell.KickHideBlizzardArt(module)
         end
@@ -380,7 +444,7 @@ function Shell.EnsureSettingsHooks(module)
     if type(module._settingsShellRepair) ~= "function" then
         module._settingsShellRepair = function()
             local activeModule = ns.ActionBars or module
-            if not activeModule or type(activeModule.ApplyConfig) ~= "function" then
+            if not activeModule or activeModule._detached == true or type(activeModule.ApplyConfig) ~= "function" then
                 return
             end
             if InCombat() then
