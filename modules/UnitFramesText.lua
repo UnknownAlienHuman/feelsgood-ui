@@ -9,12 +9,6 @@ local U = ns.U
 local Secret = ns.Secret
 
 local IsSecretFn = (Secret and Secret.IsSecretValue) or _G.issecretvalue or _G.IsSecretValue
-local ABBREVIATOR_NAMES = {
-    "AbbreviateNumbers",
-    "AbbreviateLargeNumbers",
-    "AbbreviateNumber",
-    "AbbreviateLargeNumber",
-}
 
 local function CanInspect(v)
     if Secret and Secret.CanAccess then
@@ -65,34 +59,6 @@ function Text.FormatNumberShort(cache, v)
     end
     local shortFmt = type(cache) == "table" and cache.shortFmt or nil
     return U.FormatNumberShort(v, shortFmt)
-end
-
--- Blizzard abbreviation helpers are used only for ordinary inputs. If a
--- helper returns an opaque result, pass it through unchanged to SetText.
-function Text.TryBlizzardAbbrev(v)
-    if Text.IsSecretValue(v) then
-        return false, nil
-    end
-
-    for i = 1, #ABBREVIATOR_NAMES do
-        local fn = _G[ABBREVIATOR_NAMES[i]]
-        if type(fn) == "function" then
-            local ok, result = pcall(fn, v)
-            if ok then
-                if Text.IsSecretValue(result) then
-                    return true, result
-                end
-                if result ~= nil then
-                    if type(result) == "string" then
-                        result = result:gsub("K", "k"):gsub("M", "m"):gsub("B", "b")
-                    end
-                    return true, result
-                end
-            end
-        end
-    end
-
-    return false, nil
 end
 
 function Text.FormatNumberFull(v)
