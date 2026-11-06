@@ -48,6 +48,10 @@ function Render.UpdatePower(owner)
 
     local powerType, powerToken = _G.UnitPowerType("player")
     if not CanInspect(powerType) or not CanInspect(powerToken) then
+        owner._powerLastMax = nil
+        owner.powerBar._fguiValue = 0
+        owner.powerBar:SetMinMaxValues(0, 1)
+        owner.powerBar:SetValue(0)
         owner.powerBar:SetStatusBarColor(0.25, 0.55, 1, 1)
         HideSpark(owner.powerBar)
         if owner.powerBar.text then owner.powerBar.text:SetText("") end

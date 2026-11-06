@@ -59,12 +59,13 @@ function Secret.CanInspectTable(v)
 end
 
 function Secret.NotSecret(v)
+    if not Secret.CanAccess(v) then
+        return false
+    end
+
     local fn = Secret.NotSecretValue
     if type(fn) == "function" then
         return fn(v) == true
-    end
-    if not Secret.CanAccess(v) then
-        return false
     end
     return not Secret.IsSecret(v)
 end
