@@ -1,30 +1,23 @@
--- FeelsGoodUI: transactional panel undo/reset coordination
---
--- Settings:SetTx owns ordinary field writes. This layer owns higher-level panel
--- operations that previously changed whole sections/history outside the apply
--- rollback boundary.
-
+-- FeelsGoodUI: atomic panel undo/reset operations
 local _, ns = ...
 
-local PanelTransactions = {}
-ns.PanelTransactions = PanelTransactions
+local Tx = {}
+ns.PanelTransactions = Tx
 
 local Apply = ns.Apply
 local DB = ns.DB
-local FeatureRegistry = ns.FeatureRegistry
 local Log = ns.Log
 local Settings = ns.Settings
 local Shared = ns.OptionsShared
 local U = ns.U
 
-local OriginalCreateBuilderContext = Shared and Shared.CreateBuilderContext
-local OriginalBindPanelApplyControls = Shared and Shared.BindPanelApplyControls
-local OriginalInvalidateAllHistory = Settings and Settings.InvalidateAllHistory
-local OriginalResetProfileSections = Shared and Shared.ResetProfileSections
-local OriginalUndoPanel = Settings and Settings.UndoPanel
+local OriginalContext = Shared and Shared.CreateBuilderContext
+local OriginalBind = Shared and Shared.BindPanelApplyControls
+local OriginalInvalidateAll = Settings and Settings.InvalidateAllHistory
+local OriginalUndo = Settings and Settings.UndoPanel
 
-PanelTransactions._nextID = PanelTransactions._nextID or 0
-PanelTransactions._pendingByKey = PanelTransactions._pendingByKey or {}
+Tx._nextID = Tx._nextID or 0
+Tx._byKey = Tx._byKey or {}
 
 local function Copy(value)
     if type(value) == "table" and U and type(U.DeepCopy) == "function" then
@@ -33,184 +26,61 @@ local function Copy(value)
     return value
 end
 
-local function GetProfile()
-    if DB and type(DB.EnsureProfileRoot) == "function" then
-        local profile = DB:EnsureProfileRoot()
-        if type(profile) == "table" then
-            return profile
-        end
-    end
-    if DB and type(DB.GetProfile) == "function" then
-        local profile = DB:GetProfile()
-        if type(profile) == "table" then
-            return profile
-        end
-    end
-    return nil
-end
-
-local function NormalizeKeys(keys)
+local function UniqueStrings(value)
     local out, seen = {}, {}
-
-    local function Add(key)
-        if type(key) == "string" and key ~= "" and not seen[key] then
-            seen[key] = true
-            out[#out + 1] = key
+    local function Add(item)
+        if type(item) == "string" and item ~= "" and not seen[item] then
+            seen[item] = true
+            out[#out + 1] = item
         end
     end
-
-    if type(keys) == "string" then
-        Add(keys)
-    elseif type(keys) == "table" then
-        for i = 1, #keys do
-            Add(keys[i])
-        end
+    if type(value) == "string" then
+        Add(value)
+    elseif type(value) == "table" then
+        for i = 1, #value do Add(value[i]) end
     end
-
     return out
 end
 
-local function NormalizeSections(sections)
-    local out, seen = {}, {}
-
-    local function Add(section)
-        if type(section) == "string" and section ~= "" and not seen[section] then
-            seen[section] = true
-            out[#out + 1] = section
-        end
+local function Profile()
+    local profile = DB and type(DB.EnsureProfileRoot) == "function" and DB:EnsureProfileRoot() or nil
+    if type(profile) ~= "table" and DB and type(DB.GetProfile) == "function" then
+        profile = DB:GetProfile()
     end
-
-    if type(sections) == "string" then
-        Add(sections)
-    elseif type(sections) == "table" then
-        for i = 1, #sections do
-            Add(sections[i])
-        end
-    end
-
-    return out
+    return type(profile) == "table" and profile or nil
 end
 
-local function GetPanelSections(panelKey, explicitSections, includeContract)
-    local out = NormalizeSections(explicitSections)
-    if includeContract ~= true then
-        return out
-    end
-
-    local seen = {}
-    for i = 1, #out do
-        seen[out[i]] = true
-    end
-
-    local contract = FeatureRegistry
-        and type(FeatureRegistry.GetPanelContract) == "function"
-        and FeatureRegistry:GetPanelContract(panelKey)
-        or nil
-
-    local function Add(section)
-        if type(section) == "string" and section ~= "" and not seen[section] then
-            seen[section] = true
-            out[#out + 1] = section
-        end
-    end
-
-    if type(contract) == "table" then
-        if type(contract.contextSections) == "table" then
-            for _, section in pairs(contract.contextSections) do
-                Add(section)
-            end
-        end
-        if type(contract.resetSections) == "table" then
-            for i = 1, #contract.resetSections do
-                Add(contract.resetSections[i])
-            end
-        end
-    end
-
-    return out
-end
-
-local function GetUndoSections(panelKey)
-    if not Settings or type(Settings._undoPanels) ~= "table" then
-        return nil
-    end
-
-    local stack = Settings._undoPanels[panelKey]
-    local entry = type(stack) == "table" and stack[#stack] or nil
-    if type(entry) ~= "table" then
-        return nil
-    end
-
-    local sections, seen = {}, {}
-    local function AddPath(path)
-        local section = type(path) == "table" and path[1] or nil
-        if type(section) == "string" and section ~= "" and not seen[section] then
-            seen[section] = true
-            sections[#sections + 1] = section
-        end
-    end
-
-    if type(entry.changes) == "table" then
-        for i = 1, #entry.changes do
-            AddPath(entry.changes[i] and entry.changes[i].path)
-        end
-    else
-        AddPath(entry.path)
-    end
-
-    return #sections > 0 and sections or nil
-end
-
-local function SnapshotSections(panelKey, explicitSections, includeContract)
-    local profile = GetProfile()
-    if type(profile) ~= "table" then
-        return nil
-    end
-
-    local sections = GetPanelSections(panelKey, explicitSections, includeContract)
-    if #sections == 0 then
-        return nil
-    end
+local function SnapshotSections(sections)
+    local profile = Profile()
+    local names = UniqueStrings(sections)
+    if not profile or #names == 0 then return nil end
 
     local snapshot = {}
-    for i = 1, #sections do
-        local section = sections[i]
-        snapshot[#snapshot + 1] = {
-            section = section,
-            existed = profile[section] ~= nil,
-            value = Copy(profile[section]),
+    for i = 1, #names do
+        local name = names[i]
+        snapshot[i] = {
+            name = name,
+            existed = profile[name] ~= nil,
+            value = Copy(profile[name]),
         }
     end
     return snapshot
 end
 
 local function RestoreSections(snapshot)
-    local profile = GetProfile()
-    if type(profile) ~= "table" or type(snapshot) ~= "table" then
-        return false
-    end
-
+    local profile = Profile()
+    if not profile or type(snapshot) ~= "table" then return false end
     for i = 1, #snapshot do
         local record = snapshot[i]
-        if type(record) == "table" and type(record.section) == "string" then
-            if record.existed then
-                profile[record.section] = Copy(record.value)
-            else
-                profile[record.section] = nil
-            end
-        end
+        profile[record.name] = record.existed and Copy(record.value) or nil
     end
     return true
 end
 
-local function SnapshotPanelHistory(panelKey)
-    if not Settings or type(panelKey) ~= "string" or panelKey == "" then
-        return nil
-    end
-
+local function SnapshotHistory(panelKey)
+    if not Settings or type(panelKey) ~= "string" or panelKey == "" then return nil end
     local undo = type(Settings._undoPanels) == "table" and Settings._undoPanels[panelKey] or nil
     local batch = type(Settings._undoPanelBatches) == "table" and Settings._undoPanelBatches[panelKey] or nil
-
     return {
         panelKey = panelKey,
         undoExisted = undo ~= nil,
@@ -220,337 +90,240 @@ local function SnapshotPanelHistory(panelKey)
     }
 end
 
-local function RestorePanelHistory(snapshot)
-    if not Settings or type(snapshot) ~= "table" then
-        return false
-    end
-
-    local panelKey = snapshot.panelKey
-    if type(panelKey) ~= "string" or panelKey == "" then
-        return false
-    end
-
+local function RestoreHistory(snapshot)
+    if not Settings or type(snapshot) ~= "table" then return false end
     Settings._undoPanels = Settings._undoPanels or {}
     Settings._undoPanelBatches = Settings._undoPanelBatches or {}
-
-    if snapshot.undoExisted then
-        Settings._undoPanels[panelKey] = Copy(snapshot.undo)
-    else
-        Settings._undoPanels[panelKey] = nil
-    end
-
-    if snapshot.batchExisted then
-        Settings._undoPanelBatches[panelKey] = Copy(snapshot.batch)
-    else
-        Settings._undoPanelBatches[panelKey] = nil
-    end
-
+    Settings._undoPanels[snapshot.panelKey] = snapshot.undoExisted and Copy(snapshot.undo) or nil
+    Settings._undoPanelBatches[snapshot.panelKey] = snapshot.batchExisted and Copy(snapshot.batch) or nil
     return true
 end
 
-local function RemoveTransactionFromKey(transaction, key)
-    local list = PanelTransactions._pendingByKey[key]
-    if type(list) ~= "table" then
-        return
-    end
+local function UndoSections(panelKey)
+    local stack = Settings and type(Settings._undoPanels) == "table" and Settings._undoPanels[panelKey] or nil
+    local entry = type(stack) == "table" and stack[#stack] or nil
+    if type(entry) ~= "table" then return nil end
 
-    for index = #list, 1, -1 do
-        if list[index] == transaction then
-            table.remove(list, index)
+    local sections = {}
+    local function Add(change)
+        local path = change and change.path
+        if type(path) == "table" then sections[#sections + 1] = path[1] end
+    end
+    if type(entry.changes) == "table" then
+        for i = 1, #entry.changes do Add(entry.changes[i]) end
+    else
+        Add(entry)
+    end
+    return UniqueStrings(sections)
+end
+
+local function SafeCall(label, fn)
+    if type(fn) ~= "function" then return end
+    local ok, err = pcall(fn)
+    if not ok and Log and type(Log.Error) == "function" then
+        Log:Error(label .. ": " .. tostring(err))
+    end
+end
+
+local function RemoveFromKey(transaction, key)
+    local list = Tx._byKey[key]
+    if type(list) ~= "table" then return end
+    for i = #list, 1, -1 do
+        if list[i] == transaction then table.remove(list, i) end
+    end
+    if #list == 0 then Tx._byKey[key] = nil end
+end
+
+local function Remove(transaction)
+    for i = 1, #(transaction.keys or {}) do
+        RemoveFromKey(transaction, transaction.keys[i])
+    end
+end
+
+local function Gather(keys)
+    local out, seen = {}, {}
+    local normalized = UniqueStrings(keys)
+    for i = 1, #normalized do
+        local list = Tx._byKey[normalized[i]]
+        for j = 1, #(list or {}) do
+            local transaction = list[j]
+            if not seen[transaction] then
+                seen[transaction] = true
+                out[#out + 1] = transaction
+            end
         end
     end
-    if #list == 0 then
-        PanelTransactions._pendingByKey[key] = nil
-    end
+    return out, normalized
 end
 
-local function RemoveTransaction(transaction)
-    local keys = transaction and transaction.keys or nil
-    if type(keys) ~= "table" then
-        return
-    end
-
-    for i = 1, #keys do
-        RemoveTransactionFromKey(transaction, keys[i])
-    end
-end
-
-local function SafeCallback(label, callback)
-    if type(callback) ~= "function" then
-        return
-    end
-
-    local ok, err = pcall(callback)
-    if not ok and Log and type(Log.Error) == "function" then
-        Log:Error(tostring(label) .. ": " .. tostring(err))
-    end
-end
-
-function PanelTransactions:Register(keys, transaction)
-    local normalizedKeys = NormalizeKeys(keys)
-    if #normalizedKeys == 0 or type(transaction) ~= "table" then
-        return false
-    end
+function Tx:Register(keys, transaction)
+    local normalized = UniqueStrings(keys)
+    if #normalized == 0 or type(transaction) ~= "table" then return false end
 
     self._nextID = self._nextID + 1
     transaction.id = self._nextID
-    transaction.keys = normalizedKeys
-    transaction.remaining = {}
-    transaction.finalized = false
+    transaction.keys = normalized
+    transaction.waiting = {}
 
-    for i = 1, #normalizedKeys do
-        local key = normalizedKeys[i]
-        transaction.remaining[key] = true
-        local list = self._pendingByKey[key]
-        if type(list) ~= "table" then
-            list = {}
-            self._pendingByKey[key] = list
-        end
-        list[#list + 1] = transaction
+    for i = 1, #normalized do
+        local key = normalized[i]
+        transaction.waiting[key] = true
+        self._byKey[key] = self._byKey[key] or {}
+        self._byKey[key][#self._byKey[key] + 1] = transaction
     end
-
     return true
 end
 
-local function CollectTransactions(self, keys)
-    local collected, seen = {}, {}
-    local normalizedKeys = NormalizeKeys(keys)
+function Tx:CommitKeys(keys)
+    local transactions, normalized = Gather(keys)
+    local finished = {}
 
-    for i = 1, #normalizedKeys do
-        local list = self._pendingByKey[normalizedKeys[i]]
-        if type(list) == "table" then
-            for j = 1, #list do
-                local transaction = list[j]
-                if type(transaction) == "table" and not seen[transaction] then
-                    seen[transaction] = true
-                    collected[#collected + 1] = transaction
-                end
-            end
-        end
-    end
-
-    return collected, normalizedKeys
-end
-
-function PanelTransactions:CommitKeys(keys)
-    local transactions, normalizedKeys = CollectTransactions(self, keys)
-    if #transactions == 0 then
-        return false
-    end
-
-    local finalized = {}
     for i = 1, #transactions do
         local transaction = transactions[i]
-        for j = 1, #normalizedKeys do
-            local key = normalizedKeys[j]
-            if transaction.remaining[key] then
-                transaction.remaining[key] = nil
-                RemoveTransactionFromKey(transaction, key)
+        for j = 1, #normalized do
+            local key = normalized[j]
+            if transaction.waiting[key] then
+                transaction.waiting[key] = nil
+                RemoveFromKey(transaction, key)
             end
         end
-        if not transaction.finalized and next(transaction.remaining) == nil then
-            finalized[#finalized + 1] = transaction
-        end
+        if next(transaction.waiting) == nil then finished[#finished + 1] = transaction end
     end
 
-    table.sort(finalized, function(a, b) return (a.id or 0) < (b.id or 0) end)
-    for i = 1, #finalized do
-        local transaction = finalized[i]
-        transaction.finalized = true
-        RemoveTransaction(transaction)
-        SafeCallback("Panel transaction commit", transaction.commit)
-        SafeCallback("Panel transaction onCommit", transaction.onCommit)
+    table.sort(finished, function(a, b) return a.id < b.id end)
+    for i = 1, #finished do
+        local transaction = finished[i]
+        Remove(transaction)
+        SafeCall("Panel transaction commit", transaction.commit)
+        SafeCall("Panel transaction onCommit", transaction.onCommit)
     end
-
-    return #finalized > 0
+    return #finished > 0
 end
 
-function PanelTransactions:RollbackKeys(keys)
-    local transactions = CollectTransactions(self, keys)
-    if #transactions == 0 then
-        return nil
-    end
+function Tx:RollbackKeys(keys)
+    local transactions = Gather(keys)
+    table.sort(transactions, function(a, b) return a.id > b.id end)
 
-    table.sort(transactions, function(a, b) return (a.id or 0) > (b.id or 0) end)
     local callbacks = {}
-
     for i = 1, #transactions do
         local transaction = transactions[i]
-        if not transaction.finalized then
-            transaction.finalized = true
-            RemoveTransaction(transaction)
-            SafeCallback("Panel transaction rollback", transaction.rollback)
-            if type(transaction.onRollback) == "function" then
-                callbacks[#callbacks + 1] = transaction.onRollback
-            end
+        Remove(transaction)
+        SafeCall("Panel transaction rollback", transaction.rollback)
+        if type(transaction.onRollback) == "function" then
+            callbacks[#callbacks + 1] = transaction.onRollback
         end
     end
-
-    return callbacks
+    return #callbacks > 0 and callbacks or nil
 end
 
-function PanelTransactions:RunRollbackCallbacks(callbacks)
-    if type(callbacks) ~= "table" then
-        return
-    end
-    for i = 1, #callbacks do
-        SafeCallback("Panel transaction onRollback", callbacks[i])
+function Tx:RunRollbackCallbacks(callbacks)
+    for i = 1, #(callbacks or {}) do
+        SafeCall("Panel transaction onRollback", callbacks[i])
     end
 end
 
-function PanelTransactions:InvalidateAll()
-    self._pendingByKey = {}
+function Tx:InvalidateAll()
+    self._byKey = {}
 end
 
-function PanelTransactions:UndoPanel(panelKey, applyKeys, callbacks)
-    if not (Settings and type(OriginalUndoPanel) == "function") then
-        return false
-    end
-
-    local keys = NormalizeKeys(applyKeys)
+function Tx:UndoPanel(panelKey, applyKeys, callbacks)
+    if not (Settings and type(OriginalUndo) == "function") then return false end
+    local keys = UniqueStrings(applyKeys)
     if #keys == 0 or not (Apply and type(Apply.Request) == "function") then
-        return OriginalUndoPanel(Settings, panelKey)
+        return OriginalUndo(Settings, panelKey)
     end
 
-    local undoSections = GetUndoSections(panelKey)
-    if type(undoSections) ~= "table" then
-        undoSections = GetPanelSections(panelKey, nil, true)
-    end
-
-    local sections = SnapshotSections(panelKey, undoSections, false)
-    local history = SnapshotPanelHistory(panelKey)
-    if type(sections) ~= "table" or type(history) ~= "table" then
-        return false
-    end
-
-    if OriginalUndoPanel(Settings, panelKey) ~= true then
-        return false
-    end
+    local sections = SnapshotSections(UndoSections(panelKey))
+    local history = SnapshotHistory(panelKey)
+    if not sections or not history or OriginalUndo(Settings, panelKey) ~= true then return false end
 
     local transaction = {
         rollback = function()
             RestoreSections(sections)
-            RestorePanelHistory(history)
+            RestoreHistory(history)
         end,
-        onRollback = type(callbacks) == "table" and callbacks.onRollback or nil,
         onCommit = type(callbacks) == "table" and callbacks.onCommit or nil,
+        onRollback = type(callbacks) == "table" and callbacks.onRollback or nil,
     }
+    if self:Register(keys, transaction) then return true end
 
-    if not self:Register(keys, transaction) then
-        RestoreSections(sections)
-        RestorePanelHistory(history)
-        return false
-    end
-
-    return true
+    transaction.rollback()
+    return false
 end
 
-function PanelTransactions:ResetSections(panelKey, sections, applyKeys, callbacks)
-    if not (Settings and type(Settings.ResetSections) == "function") then
-        return false
-    end
-
-    local keys = NormalizeKeys(applyKeys)
+function Tx:ResetSections(panelKey, sections, applyKeys, callbacks)
+    if not (Settings and type(Settings.ResetSections) == "function") then return false end
+    local keys = UniqueStrings(applyKeys)
     if #keys == 0 or not (Apply and type(Apply.Request) == "function") then
         return Settings:ResetSections(sections)
     end
 
-    local sectionSnapshot = SnapshotSections(panelKey, sections, false)
-    local historySnapshot = SnapshotPanelHistory(panelKey)
-    if type(sectionSnapshot) ~= "table" or type(historySnapshot) ~= "table" then
-        return false
-    end
-
-    if Settings:ResetSections(sections) ~= true then
-        return false
-    end
+    local sectionSnapshot = SnapshotSections(sections)
+    local historySnapshot = SnapshotHistory(panelKey)
+    if not sectionSnapshot or not historySnapshot or Settings:ResetSections(sections) ~= true then return false end
 
     local transaction = {
         rollback = function()
             RestoreSections(sectionSnapshot)
-            RestorePanelHistory(historySnapshot)
+            RestoreHistory(historySnapshot)
         end,
         commit = function()
             if type(Settings.InvalidatePanelHistory) == "function" then
                 Settings:InvalidatePanelHistory(panelKey)
             end
         end,
-        onRollback = type(callbacks) == "table" and callbacks.onRollback or nil,
         onCommit = type(callbacks) == "table" and callbacks.onCommit or nil,
+        onRollback = type(callbacks) == "table" and callbacks.onRollback or nil,
     }
+    if self:Register(keys, transaction) then return true end
 
-    if not self:Register(keys, transaction) then
-        RestoreSections(sectionSnapshot)
-        RestorePanelHistory(historySnapshot)
-        return false
-    end
-
-    return true
+    transaction.rollback()
+    return false
 end
 
-local function RefreshPanel(refreshFn)
-    if type(refreshFn) == "function" then
-        refreshFn()
+local function BindControls(applyState, undoBtn, resetBtn, resetSections, refreshFn, restoreApplyKeys)
+    if type(OriginalBind) == "function" then
+        OriginalBind(applyState, undoBtn, resetBtn, resetSections, refreshFn, restoreApplyKeys)
     end
-end
-
-local function BindPanelApplyControls(applyState, undoBtn, resetBtn, resetSections, refreshFn, restoreApplyKeys)
-    if type(OriginalBindPanelApplyControls) == "function" then
-        OriginalBindPanelApplyControls(applyState, undoBtn, resetBtn, resetSections, refreshFn, restoreApplyKeys)
-    end
-    if type(applyState) ~= "table" then
-        return
-    end
+    if type(applyState) ~= "table" then return end
 
     local keys = restoreApplyKeys or applyState.defaultApplyKeys
-    local callbacks = {
-        onRollback = function()
-            RefreshPanel(refreshFn)
-        end,
-    }
+    local callbacks = { onRollback = refreshFn }
 
     if undoBtn then
         undoBtn:SetScript("OnClick", function()
-            if PanelTransactions:UndoPanel(applyState.panelKey, keys, callbacks) then
+            if Tx:UndoPanel(applyState.panelKey, keys, callbacks) then
                 applyState:ApplyNow(keys)
-                RefreshPanel(refreshFn)
+                SafeCall("Panel refresh", refreshFn)
             end
         end)
     end
 
     if resetBtn then
         resetBtn:SetScript("OnClick", function()
-            if PanelTransactions:ResetSections(applyState.panelKey, resetSections, keys, callbacks) then
+            if Tx:ResetSections(applyState.panelKey, resetSections, keys, callbacks) then
                 applyState.pending = false
                 applyState:ApplyNow(keys)
-                RefreshPanel(refreshFn)
+                SafeCall("Panel refresh", refreshFn)
             end
         end)
     end
 end
 
-if Shared and type(OriginalCreateBuilderContext) == "function" then
+if Shared and type(OriginalContext) == "function" then
     function Shared.CreateBuilderContext(...)
-        local context = OriginalCreateBuilderContext(...)
-        if type(context) == "table" then
-            context.BindPanelApplyControls = BindPanelApplyControls
-        end
+        local context = OriginalContext(...)
+        if type(context) == "table" then context.BindPanelApplyControls = BindControls end
         return context
     end
-    Shared.BindPanelApplyControls = BindPanelApplyControls
+    Shared.BindPanelApplyControls = BindControls
 end
 
-if Settings and type(OriginalInvalidateAllHistory) == "function" then
+if Settings and type(OriginalInvalidateAll) == "function" then
     function Settings:InvalidateAllHistory(...)
-        PanelTransactions:InvalidateAll()
-        return OriginalInvalidateAllHistory(self, ...)
+        Tx:InvalidateAll()
+        return OriginalInvalidateAll(self, ...)
     end
 end
 
--- Keep the public direct-reset helper used by Edit Mode unchanged. Transactional
--- panel reset is installed through BindPanelApplyControls above.
-if Shared and type(OriginalResetProfileSections) == "function" then
-    Shared.ResetProfileSections = OriginalResetProfileSections
-end
-
-return PanelTransactions
+return Tx
