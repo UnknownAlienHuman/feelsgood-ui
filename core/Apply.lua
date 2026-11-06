@@ -73,15 +73,22 @@ end
 local function SafeApplyKey(key, fn)
     local perfOn = (Perf and Perf.IsEnabled and Perf:IsEnabled()) == true
     local t0 = perfOn and NowMS() or nil
-    if Settings and Settings.Normalize then
-        Settings:Normalize(key)
-    end
 
     if type(fn) ~= "function" then
         return false, "Missing apply callback: " .. tostring(key)
     end
 
-    local ok, result, detail = xpcall(fn, _ErrHandler)
+    local function Run()
+        if Settings and Settings.Normalize then
+            local normalized, detail = Settings:Normalize(key)
+            if normalized == false then
+                return false, detail or ("Settings normalization returned false: " .. tostring(key))
+            end
+        end
+        return fn()
+    end
+
+    local ok, result, detail = xpcall(Run, _ErrHandler)
     if perfOn and t0 then
         Perf:Time(key, NowMS() - t0)
         Perf:Inc("Apply:" .. tostring(key))
