@@ -17,17 +17,18 @@ function RuntimeSettings:Apply()
     if not (DB and type(DB.ApplyRuntime) == "function") then
         return false, "DB.ApplyRuntime unavailable"
     end
+    if not (Perf and type(Perf.RefreshFromProfile) == "function") then
+        return false, "Perf.RefreshFromProfile unavailable"
+    end
 
     local result, detail = DB:ApplyRuntime()
     if result == false then
         return false, detail or "DB.ApplyRuntime returned false"
     end
 
-    if Perf and type(Perf.RefreshFromProfile) == "function" then
-        local perfResult, perfDetail = Perf:RefreshFromProfile()
-        if perfResult == false then
-            return false, perfDetail or "Perf.RefreshFromProfile returned false"
-        end
+    local perfResult, perfDetail = Perf:RefreshFromProfile()
+    if perfResult == false then
+        return false, perfDetail or "Perf.RefreshFromProfile returned false"
     end
 
     return true
