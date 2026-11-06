@@ -6,7 +6,7 @@ Minimalist Retail UI addon with oUF unit frames, secure action bars, center reso
 
 - World of Warcraft Retail `12.1.5`
 - Interface `120105`
-- FeelsGoodUI `0.0.41`
+- FeelsGoodUI `0.0.42`
 - External required dependency: `oUF`
 - Saved variables: `FeelsGoodUIDB`
 
@@ -14,7 +14,7 @@ Copy the `FeelsGoodUI` directory into `World of Warcraft/_retail_/Interface/AddO
 
 ## Runtime policy
 
-Restricted/Secret Values are gated before Lua inspection. Ordinary data uses the existing render path; inaccessible health, power, class, classification, and rune values are routed only to documented native presentation sinks or an explicit unavailable state. Protected action-bar and Blizzard-frame mutations remain deferred outside combat.
+Restricted/Secret Values are gated before Lua inspection. Ordinary data uses the existing render path; inaccessible health, power, class, classification, and rune values are routed only to documented native presentation sinks or an explicit unavailable state. Protected action-bar and Blizzard-frame mutations remain deferred outside combat. Detach invalidates queued action-bar work, disables permanent hook side effects, and performs a narrow post-combat Blizzard-shell restore when teardown occurs during combat.
 
 ## Validation
 

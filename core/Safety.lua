@@ -86,8 +86,38 @@ function Safety.Dispatch(addon, event, handler, ...)
     end
 end
 
--- Coalescing debounce (keyed)
+-- Coalescing debounce (keyed). Generations make cancellation reliable even on
+-- clients where only C_Timer.After is available and no timer handle exists.
 Safety._timers = Safety._timers or {}
+Safety._timerGenerations = Safety._timerGenerations or {}
+
+local function NextTimerGeneration(key)
+    local generations = Safety._timerGenerations
+    local generation = (generations[key] or 0) + 1
+    generations[key] = generation
+    return generation
+end
+
+function Safety.CancelDebounce(key)
+    if not key then return false end
+
+    local timers = Safety._timers
+    local pending = timers[key]
+    timers[key] = nil
+    NextTimerGeneration(key)
+
+    local pendingType = type(pending)
+    if pendingType == "table" or pendingType == "userdata" then
+        local okMethod, cancel = pcall(function()
+            return pending.Cancel
+        end)
+        if okMethod and type(cancel) == "function" then
+            pcall(cancel, pending)
+        end
+    end
+
+    return pending ~= nil
+end
 
 function Safety.Debounce(key, delay, fn)
     if not key or type(fn) ~= "function" then return false end
@@ -96,20 +126,23 @@ function Safety.Debounce(key, delay, fn)
     local timers = Safety._timers
     if timers[key] then return false end
 
+    local generation = NextTimerGeneration(key)
+    local function Run()
+        if Safety._timerGenerations[key] ~= generation then
+            return
+        end
+        timers[key] = nil
+        Safety.Guard(key, fn)
+    end
+
     if C_Timer and C_Timer.NewTimer then
-        timers[key] = C_Timer.NewTimer(delay, function()
-            timers[key] = nil
-            Safety.Guard(key, fn)
-        end)
+        timers[key] = C_Timer.NewTimer(delay, Run)
         return true
     end
 
     if C_Timer and C_Timer.After then
         timers[key] = true
-        C_Timer.After(delay, function()
-            timers[key] = nil
-            Safety.Guard(key, fn)
-        end)
+        C_Timer.After(delay, Run)
         return true
     end
 

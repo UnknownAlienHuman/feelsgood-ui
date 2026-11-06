@@ -238,6 +238,64 @@ local function IsDetached(module)
     return module and module._detached == true
 end
 
+local function InvalidateInitialApply(module)
+    if not IsReady(module) then
+        return
+    end
+    module._initialApplyGeneration = (module._initialApplyGeneration or 0) + 1
+    module._initialApplyQueued = nil
+end
+
+local function CancelDetachedRestore(module)
+    if not IsReady(module) then
+        return
+    end
+
+    module._detachRestoreGeneration = (module._detachRestoreGeneration or 0) + 1
+    module._pendingDetachedRestore = nil
+
+    local frame = module._detachRestoreFrame
+    if frame then
+        frame:UnregisterAllEvents()
+        frame:SetScript("OnEvent", nil)
+    end
+end
+
+local function QueueDetachedRestore(module)
+    if not IsReady(module) then
+        return
+    end
+
+    CancelDetachedRestore(module)
+    local generation = module._detachRestoreGeneration
+    module._pendingDetachedRestore = true
+
+    local frame = module._detachRestoreFrame
+    if not frame then
+        frame = CreateFrame("Frame")
+        module._detachRestoreFrame = frame
+    end
+
+    frame:RegisterEvent("PLAYER_REGEN_ENABLED")
+    frame:SetScript("OnEvent", function(self)
+        if module._detachRestoreGeneration ~= generation then
+            return
+        end
+        if not IsDetached(module) then
+            CancelDetachedRestore(module)
+            return
+        end
+        if InCombat() then
+            return
+        end
+
+        if Shell and Shell.RestoreBlizzardArt then
+            Shell.RestoreBlizzardArt(module, GetBarsConfig())
+        end
+        CancelDetachedRestore(module)
+    end)
+end
+
 local function EnsureActionChangedCallback(module)
     if (not module._callbackHandles)
         and EventUtil
@@ -254,6 +312,9 @@ local function EnsureActionChangedCallback(module)
 
     module._actionChangedCallbackRegistered = true
     module._callbackHandles:RegisterCallback(_G.EventRegistry, "ActionButton.OnActionChanged", function(_, button)
+        if IsDetached(module) then
+            return
+        end
         if Visuals and Visuals.RefreshButtonVisualState then
             if Visuals.RefreshButtonVisualState(button) then
                 return
@@ -355,11 +416,13 @@ function Runtime.QueueInitialApply(module, delay)
         return
     end
 
+    local generation = (module._initialApplyGeneration or 0) + 1
+    module._initialApplyGeneration = generation
     module._initialApplyQueued = true
 
     local function Run()
         local activeModule = ns.ActionBars or module
-        if not activeModule then
+        if not activeModule or activeModule._initialApplyGeneration ~= generation then
             return
         end
         activeModule._initialApplyQueued = nil
@@ -399,10 +462,16 @@ function Runtime.Init(module)
 end
 
 function Runtime.Attach(module)
+    if not IsReady(module) then
+        return false
+    end
+
+    CancelDetachedRestore(module)
+    module._detached = nil
+
     if Runtime.Init(module) == false then
         return false
     end
-    module._detached = nil
     if module._eventsAttached then
         return true
     end
@@ -419,6 +488,10 @@ function Runtime.Attach(module)
     frame:RegisterEvent("PLAYER_REGEN_DISABLED")
     frame:RegisterEvent("PLAYER_REGEN_ENABLED")
     frame:SetScript("OnEvent", function(_, event)
+        if IsDetached(module) then
+            return
+        end
+
         if event == "PLAYER_REGEN_DISABLED" then
             module:UpdateAutoHideState()
             return
@@ -464,11 +537,23 @@ function Runtime.Detach(module)
         return false
     end
 
-    module._detached = true
-    module._initialApplyQueued = nil
+    if State and State.ResetAutoHideState then
+        State.ResetAutoHideState(module)
+    end
+    InvalidateInitialApply(module)
+    if Shell and Shell.CancelPendingWork then
+        Shell.CancelPendingWork(module)
+    end
 
-    if not InCombat() and Shell and Shell.RestoreBlizzardArt then
-        Shell.RestoreBlizzardArt(module, GetBarsConfig())
+    module._detached = true
+
+    if InCombat() then
+        QueueDetachedRestore(module)
+    else
+        CancelDetachedRestore(module)
+        if Shell and Shell.RestoreBlizzardArt then
+            Shell.RestoreBlizzardArt(module, GetBarsConfig())
+        end
     end
 
     if not module._eventFrame then
