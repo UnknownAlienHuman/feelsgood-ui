@@ -4,7 +4,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 
 ## Retail 12.1.5 implementation status
 
-- [x] Target Interface `120105` and release `0.0.45`.
+- [x] Target Interface `120105` and release `0.0.46`.
 - [x] Gate Secret/Restricted Values before Lua inspection, conversion, comparison, or formatting.
 - [x] Integrate restricted Unit Frame and Center Bar handling into the canonical render/target owners; remove late method overrides and duplicate producer calls.
 - [x] Keep opaque power/text on exact native sinks where available; otherwise render an explicit unavailable state.
@@ -15,6 +15,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 - [x] Invalidate queued ActionBars apply/hide/auto-hide work on detach, silence permanent hooks while detached, and defer Blizzard-shell restoration through one post-combat watcher.
 - [x] Define one shared debounce contract: an existing keyed timer is a successful coalesced request, callers never inspect `Safety._timers`, and teardown cancellation invalidates generations before restore.
 - [x] Propagate explicit apply-handler failures through FeatureRegistry/App/Apply, roll back the entire settings batch, restore already-applied runtime owners, and centrally defer UnitFrames transactions during combat.
+- [x] Make panel undo/reset transactional: failed and partially deferred batches restore exact profile sections and undo history; reset invalidates history only after every required apply key commits.
 
 ## Required in-game validation
 
@@ -26,7 +27,10 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 - [ ] Center bars handle ordinary and restricted power/rune values without duplicate producer calls, error loops, retained opaque samples, or stale text.
 - [ ] Companion micro-menu/bag hooks coalesce repeated show/hide/layout requests instead of bypassing the queue; detach cancels both apply and micro-layout generations.
 - [ ] Force an apply handler to return `false`; pending settings roll back, later keys do not execute, and previously applied owners are restored from the rolled-back profile.
+- [ ] Force `Undo last` apply failure; the pre-undo profile and exact undo stack return, and the panel refreshes after rollback.
+- [ ] Force panel reset apply failure, including an actionbars+companion multi-key reset; defaults do not persist and history is retained.
 - [ ] Change UnitFrames settings during combat; the transaction remains pending until `PLAYER_REGEN_ENABLED` and commits only after the real runtime apply succeeds.
+- [ ] Perform multi-key undo/reset where one key commits before another leaves combat; history is finalized only after the final required key succeeds.
 - [ ] Disable ActionBars both out of combat and during combat; after combat, Blizzard shell is restored once and no stale delayed hide/apply callback reclaims it.
 - [ ] Rapid `Disable -> Enable` before queued callbacks fire does not execute an older lifecycle generation.
 - [ ] Enter/leave combat with action bars, movers, Edit Mode, profile apply/import/reset, and module disable/enable; no `ADDON_ACTION_BLOCKED` or `ADDON_ACTION_FORBIDDEN`.
