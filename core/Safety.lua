@@ -98,6 +98,10 @@ local function NextTimerGeneration(key)
     return generation
 end
 
+function Safety.IsDebouncePending(key)
+    return key ~= nil and Safety._timers[key] ~= nil
+end
+
 function Safety.CancelDebounce(key)
     if not key then return false end
 
@@ -119,12 +123,15 @@ function Safety.CancelDebounce(key)
     return pending ~= nil
 end
 
+-- Returns true when the request was scheduled OR coalesced into an existing
+-- request. False means the arguments/timer backend are unavailable and callers
+-- may execute their synchronous fallback.
 function Safety.Debounce(key, delay, fn)
     if not key or type(fn) ~= "function" then return false end
     delay = tonumber(delay) or 0
 
     local timers = Safety._timers
-    if timers[key] then return false end
+    if timers[key] then return true end
 
     local generation = NextTimerGeneration(key)
     local function Run()
