@@ -105,14 +105,7 @@ local CENTER_EVENT_HANDLERS = {
     end,
 }
 
-function Runtime:Attach(owner)
-    if not owner._inited then
-        owner:Init()
-    end
-    if not owner._inited then
-        return false
-    end
-
+local function EnsureEvents(owner)
     if owner._eventsAttached then
         return true
     end
@@ -156,6 +149,34 @@ function Runtime:Attach(owner)
     return true
 end
 
+local function DetachEvents(owner)
+    if owner._eventFrame then
+        owner._eventFrame:UnregisterAllEvents()
+        owner._eventFrame:SetScript("OnEvent", nil)
+    end
+    owner._eventsAttached = false
+end
+
+function Runtime:Attach(owner)
+    local center = GetCenterCfg()
+    if center.enabled == false then
+        DetachEvents(owner)
+        return true
+    end
+
+    if not owner._inited then
+        local initialized, detail = owner:Init()
+        if initialized == false then
+            return false, detail
+        end
+    end
+    if not owner._inited then
+        return false, "CenterBars initialization incomplete"
+    end
+
+    return EnsureEvents(owner)
+end
+
 function Runtime:Detach(owner)
     Call("StopRuneTicker", owner)
     Call("RestoreDefaultClassResources", owner)
@@ -164,19 +185,14 @@ function Runtime:Detach(owner)
         owner.frame:Hide()
     end
 
-    if not owner._eventFrame then
-        owner._eventsAttached = false
-        return false
-    end
-
-    owner._eventFrame:UnregisterAllEvents()
-    owner._eventFrame:SetScript("OnEvent", nil)
-    owner._eventsAttached = false
+    DetachEvents(owner)
     return true
 end
 
 function Runtime:Init(owner)
-    if owner._inited then return end
+    if owner._inited then
+        return true
+    end
 
     local createCenterMoverSpec = Ctx().CreateCenterMoverSpec
     local createPowerBar = Ctx().CreatePowerBar
@@ -185,13 +201,13 @@ function Runtime:Init(owner)
         or type(createPowerBar) ~= "function"
         or type(ensureSegmentPool) ~= "function" then
         Log:Warn("CenterBars runtime helpers missing; init aborted.")
-        return
+        return false, "CenterBars runtime helpers missing"
     end
 
     local center = GetCenterCfg()
     if center.enabled == false then
         Log:Info("CenterBars disabled (DB).")
-        return
+        return true
     end
     Call("RefreshThresholdConfig", owner)
 
@@ -203,12 +219,11 @@ function Runtime:Init(owner)
     local f = CreateFrame("Frame", "FGUI_Center", UIParent)
     f:SetSize(w, h1 + gap + h2)
 
-    owner.frame = f
-
     local resource = CreateFrame("Frame", nil, f)
     resource:SetPoint("TOP", f, "TOP", 0, 0)
     resource:SetSize(w, h1)
 
+    owner.frame = f
     owner.resourceBar = resource
     owner.resourceSegments = {}
 
@@ -222,7 +237,7 @@ function Runtime:Init(owner)
         owner.resourceBar = nil
         owner.resourceSegments = nil
         Log:Warn("CenterBars power bar helper returned nil; init aborted.")
-        return
+        return false, "CenterBars power bar helper returned nil"
     end
     power:SetPoint("TOP", resource, "BOTTOM", 0, -gap)
     owner.powerBar = power
@@ -236,6 +251,7 @@ function Runtime:Init(owner)
     Call("UpdatePower", owner)
 
     Log:Info("CenterBars initialized.")
+    return true
 end
 
 function Runtime:ApplyConfig(owner)
@@ -245,18 +261,29 @@ function Runtime:ApplyConfig(owner)
     if center.enabled == false then
         Call("StopRuneTicker", owner)
         Call("RestoreDefaultClassResources", owner)
+        DetachEvents(owner)
         if owner.frame then
             owner.frame:Hide()
         end
-        return
+        return true
     end
 
     Call("RefreshThresholdConfig", owner)
 
     if not owner._inited then
-        owner:Init()
+        local initialized, detail = owner:Init()
+        if initialized == false then
+            return false, detail
+        end
     end
-    if not owner.frame then return end
+    if not owner.frame then
+        return false, "CenterBars frame unavailable"
+    end
+
+    local attached, attachDetail = EnsureEvents(owner)
+    if attached == false then
+        return false, attachDetail
+    end
 
     local w = tonumber(center.width) or 560
     local h1 = tonumber(center.resourceHeight) or 12
@@ -301,6 +328,7 @@ function Runtime:ApplyConfig(owner)
     owner.frame:Show()
     Call("RefreshResourceMode", owner)
     Call("UpdatePower", owner)
+    return true
 end
 
 return Runtime
