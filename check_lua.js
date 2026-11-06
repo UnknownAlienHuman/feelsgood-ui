@@ -104,6 +104,9 @@ try {
 
     assertBefore(tocEntries, 'core/Secret.lua', 'core/Utils.lua');
     assertBefore(tocEntries, 'core/Settings.lua', 'core/Apply.lua');
+    assertBefore(tocEntries, 'core/Perf.lua', 'core/RuntimeSettings.lua');
+    assertBefore(tocEntries, 'core/FeatureRegistry.lua', 'core/RuntimeSettings.lua');
+    assertBefore(tocEntries, 'core/RuntimeSettings.lua', 'core/Commands.lua');
     assertBefore(tocEntries, 'core/Apply.lua', 'core/PanelTransactions.lua');
     assertBefore(tocEntries, 'core/OptionsSharedHelpers.lua', 'core/PanelTransactions.lua');
     assertBefore(tocEntries, 'core/PanelTransactions.lua', 'core/OptionsFieldBuilders.lua');

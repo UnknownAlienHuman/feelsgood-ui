@@ -35,6 +35,26 @@ local function GetSection(section)
     return value
 end
 
+local function WriteSetting(applyKeys, path, value, rule, panelKey)
+    local Settings = ns.Settings
+    local Apply = ns.Apply
+    local Log = ns.Log
+
+    if not (Settings and type(Settings.SetTx) == "function"
+        and Apply and type(Apply.Request) == "function") then
+        if Log and type(Log.Warn) == "function" then
+            Log:Warn(L("Settings transaction owner is not available."))
+        end
+        return false, nil
+    end
+
+    local changed, stored = Settings:SetTx(applyKeys, path, value, rule, panelKey)
+    if changed == true then
+        Apply:Request(applyKeys)
+    end
+    return changed == true, stored
+end
+
 local function PrintRecentErrors()
     local Errors = ns.Errors
     local Log = ns.Log
@@ -64,13 +84,21 @@ local function BuildCommandMap()
             run = function()
                 local general = GetSection("general")
                 local Log = ns.Log
-                local DB = ns.DB
-                if not (general and Log and DB and DB.ApplyRuntime) then
+                if not (general and Log) then
                     return
                 end
-                general.debug = not general.debug
-                DB:ApplyRuntime()
-                Log:Info(L("Debug = %s"):format(tostring(general.debug)))
+
+                local nextValue = not (general.debug == true)
+                local changed, stored = WriteSetting(
+                    "runtime",
+                    { "general", "debug" },
+                    nextValue,
+                    { type = "boolean", fallback = false },
+                    "general"
+                )
+                if changed then
+                    Log:Info(L("Debug = %s"):format(tostring(stored == true)))
+                end
             end,
         },
         unlock = {
@@ -109,22 +137,21 @@ local function BuildCommandMap()
             run = function(rest)
                 local mode = (rest or ""):match("^(%S+)$")
                 local Log = ns.Log
-                local UF = ns.UF
-                local unitframes = GetSection("unitframes")
                 if mode ~= "mini" and mode ~= "classic" then
                     if Log then Log:Warn(L("Usage: /fgui aura mini|classic")) end
                     return
                 end
-                if not unitframes then
-                    return
-                end
-                unitframes.targetAuras = unitframes.targetAuras or {}
-                unitframes.targetAuras.mode = (mode == "mini") and "MINI" or "CLASSIC"
-                if UF and UF.ApplyTargetAuraMode then
-                    UF:ApplyTargetAuraMode()
-                end
-                if Log then
-                    Log:Info(L("Target auras: %s"):format(unitframes.targetAuras.mode))
+
+                local targetMode = (mode == "mini") and "MINI" or "CLASSIC"
+                local changed, stored = WriteSetting(
+                    "unitframes",
+                    { "unitframes", "targetAuras", "mode" },
+                    targetMode,
+                    { type = "enum", values = { "MINI", "CLASSIC" }, fallback = "MINI" },
+                    "unitframes"
+                )
+                if changed and Log then
+                    Log:Info(L("Target auras: %s"):format(tostring(stored)))
                 end
             end,
         },
@@ -203,13 +230,21 @@ local function BuildCommandMap()
             desc = "toggle perf overlay",
             run = function()
                 local general = GetSection("general")
-                local Perf = ns.Perf
+                local Log = ns.Log
                 if not general then
                     return
                 end
-                general.perfOverlay = not (general.perfOverlay == true)
-                if Perf and Perf.SetEnabled then
-                    Perf:SetEnabled(general.perfOverlay)
+
+                local nextValue = not (general.perfOverlay == true)
+                local changed, stored = WriteSetting(
+                    "runtime",
+                    { "general", "perfOverlay" },
+                    nextValue,
+                    { type = "boolean", fallback = false },
+                    "general"
+                )
+                if changed and Log then
+                    Log:Info(L("Perf overlay = %s"):format(tostring(stored == true)))
                 end
             end,
         },
