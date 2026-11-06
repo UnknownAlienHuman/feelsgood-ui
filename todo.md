@@ -4,7 +4,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 
 ## Retail 12.1.5 implementation status
 
-- [x] Target Interface `120105` and release `0.0.48`.
+- [x] Target Interface `120105` and release `0.0.49`.
 - [x] Gate Secret/Restricted Values before Lua inspection, conversion, comparison, or formatting.
 - [x] Integrate restricted Unit Frame and Center Bar handling into the canonical render/target owners; remove late method overrides and duplicate producer calls.
 - [x] Keep opaque power/text on exact native sinks where available; otherwise render an explicit unavailable state.
@@ -18,12 +18,17 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 - [x] Journal scalar writes, panel undo, and panel reset in one operation order; failed/deferred batches repair exact undo artifacts, preserve newer owners, and restore every runtime key that had already committed.
 - [x] Make lifecycle enable/disable result-aware and reentrancy-safe; failed attach/apply never publishes an enabled state, independent features continue loading, and disabled-at-login UnitFrames/CenterBars can acquire their runtime owners later.
 - [x] Route debug/perf/aura/minimap command and General-panel mutations through `Settings:SetTx -> Apply`; remove duplicate direct runtime writes and make `RuntimeSettings` the single owner of logging/perf application.
+- [x] Make mover input transactional: drag/resize preview stays transient, positions and Edit Mode state use the combat-deferred `movers` owner, and feature scale/size commits produce one normalized Settings transaction instead of direct SavedVariables writes.
 
 ## Required in-game validation
 
 - [ ] Record `GetBuildInfo()` and confirm Interface `120105` on the tested client.
 - [ ] Fresh login and `/reload` complete with zero repeating Lua errors.
 - [ ] `/fgui qa` and `/fgui report` complete without legacy-field or schema failures.
+- [ ] Drag a mover continuously; the frame previews smoothly, SavedVariables/undo history change once on drag stop, and reload preserves the final point.
+- [ ] Resize/scale UnitFrames, CenterBars, ActionBars, Companion pet bar, and ExperienceBar; each terminal action creates one logical undo entry and one feature apply, with no per-frame write/apply storm.
+- [ ] Force `movers` apply failure after a position, lock-state, Edit Mode setting, or Reset Positions change; profile, frame position/overlay state, and exact undo artifact restore together.
+- [ ] Change mover/Edit Mode settings during combat; the transaction remains pending and applies once after `PLAYER_REGEN_ENABLED` without protected-action errors.
 - [ ] Toggle debug and perf from both General settings and slash commands; profile, runtime state, and `Undo last` stay identical after success and rollback.
 - [ ] Run `/fgui aura mini|classic`; UnitFrames apply executes through the normal queue and a forced failure restores the prior mode/history.
 - [ ] Show/hide/reset the minimap icon from settings and slash commands; position reset is one undo action and failed `LibDBIcon` apply rolls back hide/position values.

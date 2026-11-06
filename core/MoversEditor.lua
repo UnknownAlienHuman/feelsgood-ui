@@ -15,7 +15,6 @@ function EditorModule.Create(ctx)
 
     local IsSafeToEdit = ctx.IsSafeToEdit
     local GetCursorUI = ctx.GetCursorUI
-    local Clamp = ctx.Clamp
     local EditorCfg = ctx.EditorCfg
     local EnsureCenterAnchor = ctx.EnsureCenterAnchor
     local GetPosition = ctx.GetPosition
@@ -35,6 +34,7 @@ function EditorModule.Create(ctx)
     local SavePoint = ctx.SavePoint
     local SupportsResize = ctx.SupportsResize
     local GetResizeValue = ctx.GetResizeValue
+    local PreviewResizeValue = ctx.PreviewResizeValue
     local SetResizeValue = ctx.SetResizeValue
     local HandleWheelAction = ctx.HandleWheelAction
 
@@ -138,6 +138,8 @@ function EditorModule.Create(ctx)
         overlay._snapYT = nil
         overlay._startW = 0
         overlay._startH = 0
+        overlay._previewW = nil
+        overlay._previewH = nil
 
         local function UpdateHandleVisibility()
             local cfg = EditorCfg()
@@ -156,7 +158,6 @@ function EditorModule.Create(ctx)
             end
 
             SetActiveMover(key, overlay)
-
             ShowInspectorFor(key, overlay)
         end)
 
@@ -189,7 +190,6 @@ function EditorModule.Create(ctx)
             end
 
             EnsureCenterAnchor(key, frame)
-
             SetActiveMover(key, overlay)
 
             local cx, cy = GetCursorUI()
@@ -260,7 +260,8 @@ function EditorModule.Create(ctx)
 
             local altDown = (_G.IsAltKeyDown and IsAltKeyDown()) or false
             local shiftDown = (_G.IsShiftKeyDown and IsShiftKeyDown()) or false
-            local changed = (type(HandleWheelAction) == "function") and HandleWheelAction(key, delta, shiftDown, altDown) == true
+            local changed = (type(HandleWheelAction) == "function")
+                and HandleWheelAction(key, delta, shiftDown, altDown) == true
 
             if changed then
                 UpdateInspector(key, frame)
@@ -282,12 +283,12 @@ function EditorModule.Create(ctx)
             end
 
             EnsureCenterAnchor(key, frame)
-
             SetActiveMover(key, overlay)
 
             local cx, cy = GetCursorUI()
             overlay._startCursorX, overlay._startCursorY = cx, cy
             overlay._startW, overlay._startH = GetResizeValue(key)
+            overlay._previewW, overlay._previewH = overlay._startW, overlay._startH
             overlay._resizing = true
 
             ShowInspectorFor(key, overlay)
@@ -302,10 +303,14 @@ function EditorModule.Create(ctx)
                 local dx = ccx - overlay._startCursorX
                 local dy = ccy - overlay._startCursorY
 
-                local nw = overlay._startW + dx
-                local nh = overlay._startH - dy
-
-                SetResizeValue(key, nw, nh)
+                local requestedW = overlay._startW + dx
+                local requestedH = overlay._startH - dy
+                local previewW, previewH = requestedW, requestedH
+                if type(PreviewResizeValue) == "function" then
+                    previewW, previewH = PreviewResizeValue(key, requestedW, requestedH)
+                end
+                overlay._previewW = tonumber(previewW) or requestedW
+                overlay._previewH = tonumber(previewH) or requestedH
                 UpdateInspector(key, frame)
             end)
         end)
@@ -314,8 +319,17 @@ function EditorModule.Create(ctx)
             if btn ~= "LeftButton" or not overlay._resizing then
                 return
             end
+
+            local finalW = overlay._previewW or overlay._startW
+            local finalH = overlay._previewH or overlay._startH
             overlay._resizing = false
             overlay:SetScript("OnUpdate", nil)
+            overlay._previewW = nil
+            overlay._previewH = nil
+
+            if type(SetResizeValue) == "function" then
+                SetResizeValue(key, finalW, finalH)
+            end
             UpdateInspector(key, frame)
         end)
 

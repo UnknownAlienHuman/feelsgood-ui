@@ -1,13 +1,17 @@
--- FeelsGoodUI: shared Movers geometry + apply helpers
+-- FeelsGoodUI: shared Movers geometry + transactional position helpers
 
 local _, ns = ...
 
 local DB = ns.DB
 local Log = ns.Log
 local Apply = ns.Apply
+local Settings = ns.Settings
 
 local Shared = ns.MoversShared or {}
 ns.MoversShared = Shared
+
+local MOVERS_APPLY_KEY = "movers"
+local PANEL_KEY = "editmode"
 
 local VALID_POINTS = {
     TOPLEFT = true, TOP = true, TOPRIGHT = true,
@@ -201,15 +205,72 @@ local function NormalizePointTable(pos, fallback)
     }
 end
 
+local function PointsEqual(a, b)
+    return type(a) == "table"
+        and type(b) == "table"
+        and a.point == b.point
+        and a.relPoint == b.relPoint
+        and a.x == b.x
+        and a.y == b.y
+end
+
+local function NormalizeApplyKeys(keys)
+    if type(keys) == "string" then
+        if keys ~= "" then
+            return { keys }
+        end
+        return {}
+    end
+
+    if type(keys) ~= "table" then
+        return {}
+    end
+
+    local out = {}
+    local seen = {}
+    for i = 1, #keys do
+        local key = keys[i]
+        if type(key) == "string" and key ~= "" and not seen[key] then
+            seen[key] = true
+            out[#out + 1] = key
+        end
+    end
+    return out
+end
+
+local function RequestApplyForKeys(keys, scope)
+    local resolved = NormalizeApplyKeys(keys)
+    if #resolved == 0 then
+        if Log and Log.Warn then
+            Log:Warn("Movers: no apply mapping for '" .. tostring(scope) .. "'.")
+        end
+        return false
+    end
+
+    if Apply and Apply.Request then
+        if #resolved == 1 then
+            Apply:Request(resolved[1])
+        else
+            Apply:Request(resolved)
+        end
+        return true
+    end
+
+    if Log and Log.Warn then
+        Log:Warn("Movers: apply queue unavailable; runtime refresh skipped for '" .. tostring(scope) .. "'.")
+    end
+    return false
+end
+
 local function GetMoverPositionKey(key, spec)
     if type(spec) == "table" then
         local positionKey = spec.positionKey
-        if type(positionKey) == "string" and positionKey ~= "" then
+        if type(positionKey) == "string" or type(positionKey) == "number" then
             return positionKey
         end
     end
 
-    if type(key) == "string" and key ~= "" then
+    if type(key) == "string" or type(key) == "number" then
         return key
     end
 
@@ -243,22 +304,39 @@ local function SetStoredPoint(key, spec, point, frame)
 
     if type(spec) == "table" and type(spec.setStoredPoint) == "function" then
         local ok, handled = pcall(spec.setStoredPoint, spec, key, frame, normalized)
-        if ok and handled == true then
-            return normalized
+        if not ok then
+            error(handled, 0)
         end
-        if ok and type(handled) == "table" then
+        if type(handled) == "table" then
             normalized = NormalizePointTable(handled, normalized)
         end
     end
 
     local positionKey = GetMoverPositionKey(key, spec)
     if not positionKey then
-        return normalized
+        return normalized, false
     end
 
-    local positions = EnsureProfileSection("positions")
-    positions[positionKey] = normalized
-    return normalized
+    local current = GetStoredPoint(key, spec, frame)
+    if PointsEqual(current, normalized) then
+        return normalized, false
+    end
+
+    if not (Settings and type(Settings.SetTx) == "function") then
+        if Log and Log.Warn then
+            Log:Warn("Movers: settings transaction owner unavailable for position '" .. tostring(positionKey) .. "'.")
+        end
+        return normalized, false
+    end
+
+    local changed = Settings:SetTx(
+        MOVERS_APPLY_KEY,
+        { "positions", positionKey },
+        normalized,
+        nil,
+        PANEL_KEY
+    )
+    return normalized, changed == true
 end
 
 local function GetFrameCenterOffsets(frame)
@@ -286,8 +364,14 @@ local function ApplyPoint(frame, pos, spec, key)
 
     if type(spec) == "table" and type(spec.applyPoint) == "function" then
         local ok, handled = pcall(spec.applyPoint, spec, key, frame, normalized)
-        if ok and handled == true then
+        if not ok then
+            error(handled, 0)
+        end
+        if handled == true then
             return normalized
+        end
+        if type(handled) == "table" then
+            normalized = NormalizePointTable(handled, normalized)
         end
     end
 
@@ -326,6 +410,7 @@ local function GetEditablePosition(key, frame, spec)
     return 0, 0
 end
 
+-- Preview-only movement. Persisted position is written once by SavePoint.
 local function SetEditablePosition(key, frame, x, y, spec)
     local normalized = NormalizePointTable({
         point = "CENTER",
@@ -336,11 +421,13 @@ local function SetEditablePosition(key, frame, x, y, spec)
 
     if type(spec) == "table" and type(spec.setEditPosition) == "function" then
         local ok, handled = pcall(spec.setEditPosition, spec, key, frame, normalized.x, normalized.y, normalized)
-        if ok and handled == true then
-            SetStoredPoint(key, spec, normalized, frame)
+        if not ok then
+            error(handled, 0)
+        end
+        if handled == true then
             return normalized
         end
-        if ok and type(handled) == "table" then
+        if type(handled) == "table" then
             normalized = NormalizePointTable(handled, normalized)
         end
     end
@@ -349,45 +436,51 @@ local function SetEditablePosition(key, frame, x, y, spec)
         ApplyPoint(frame, normalized, spec, key)
     end
 
-    return SetStoredPoint(key, spec, normalized, frame)
+    return normalized
 end
 
 local function EnsureCenterAnchor(key, frame, spec)
     if not frame then return end
     local x, y = GetEditablePosition(key, frame, spec)
-    SetEditablePosition(key, frame, x, y, spec)
+    return SetEditablePosition(key, frame, x, y, spec)
 end
 
 local function SavePoint(key, frame, spec)
-    if not key or not frame then return end
+    if not key or not frame then return nil, false end
 
     local point, relFrame, relPoint, x, y = frame:GetPoint(1)
+    local stored
+    local changed
+
     if relFrame and relFrame ~= UIParent then
         local cx, cy = GetEditablePosition(key, frame, spec)
-        return SetStoredPoint(key, spec, {
+        stored, changed = SetStoredPoint(key, spec, {
             point = "CENTER",
             relPoint = "CENTER",
             x = cx,
             y = cy,
         }, frame)
-    end
-
-    if type(point) ~= "string" or type(relPoint) ~= "string" then
+    elseif type(point) ~= "string" or type(relPoint) ~= "string" then
         local cx, cy = GetEditablePosition(key, frame, spec)
-        return SetStoredPoint(key, spec, {
+        stored, changed = SetStoredPoint(key, spec, {
             point = "CENTER",
             relPoint = "CENTER",
             x = cx,
             y = cy,
         }, frame)
+    else
+        stored, changed = SetStoredPoint(key, spec, {
+            point = point,
+            relPoint = relPoint,
+            x = (type(x) == "number") and x or 0,
+            y = (type(y) == "number") and y or 0,
+        }, frame)
     end
 
-    return SetStoredPoint(key, spec, {
-        point = point,
-        relPoint = relPoint,
-        x = (type(x) == "number") and x or 0,
-        y = (type(y) == "number") and y or 0,
-    }, frame)
+    if changed then
+        RequestApplyForKeys(MOVERS_APPLY_KEY, key)
+    end
+    return stored, changed
 end
 
 local function GridStep()
@@ -423,53 +516,8 @@ local function EditorCfg()
     return cfg
 end
 
-local function NormalizeApplyKeys(keys)
-    if type(keys) == "string" then
-        if keys ~= "" then
-            return { keys }
-        end
-        return {}
-    end
-
-    if type(keys) ~= "table" then
-        return {}
-    end
-
-    local out = {}
-    local seen = {}
-    for i = 1, #keys do
-        local key = keys[i]
-        if type(key) == "string" and key ~= "" and not seen[key] then
-            seen[key] = true
-            out[#out + 1] = key
-        end
-    end
-    return out
-end
-
-local function RequestApplyForKeys(keys, scope)
-    local resolved = NormalizeApplyKeys(keys)
-    if #resolved == 0 then
-        if Log and Log.Warn then
-            Log:Warn("Movers: no apply mapping for '" .. tostring(scope) .. "'.")
-        end
-        return
-    end
-
-    if Apply and Apply.Request then
-        if #resolved == 1 then
-            Apply:Request(resolved[1])
-        else
-            Apply:Request(resolved)
-        end
-        return
-    end
-
-    if Log and Log.Warn then
-        Log:Warn("Movers: apply queue unavailable; runtime refresh skipped for '" .. tostring(scope) .. "'.")
-    end
-end
-
+Shared.MOVERS_APPLY_KEY = MOVERS_APPLY_KEY
+Shared.PANEL_KEY = PANEL_KEY
 Shared.GetProfileSection = GetProfileSection
 Shared.EnsureProfileSection = EnsureProfileSection
 Shared.IsSafeToEdit = IsSafeToEdit
@@ -481,6 +529,8 @@ Shared.RoundToStep = RoundToStep
 Shared.ClampCenterOffsets = ClampCenterOffsets
 Shared.GetFrameSnapSize = GetFrameSnapSize
 Shared.GetFrameSnapBounds = GetFrameSnapBounds
+Shared.NormalizeApplyKeys = NormalizeApplyKeys
+Shared.RequestApplyForKeys = RequestApplyForKeys
 Shared.ApplyPoint = ApplyPoint
 Shared.ApplyStoredPoint = ApplyStoredPoint
 Shared.GetStoredPoint = GetStoredPoint
@@ -491,4 +541,3 @@ Shared.EnsureCenterAnchor = EnsureCenterAnchor
 Shared.SavePoint = SavePoint
 Shared.GridStep = GridStep
 Shared.EditorCfg = EditorCfg
-Shared.RequestApplyForKeys = RequestApplyForKeys

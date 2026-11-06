@@ -9,14 +9,10 @@ function InspectorModule.Create(ctx)
     ctx = ctx or {}
 
     local Movers = ctx.Movers
-    local DB = ctx.DB
     local Log = ctx.Log
     local Media = ctx.Media
-    local U = ctx.U
     local L = ctx.L or function(text) return text end
 
-    local GetProfileSection = ctx.GetProfileSection
-    local EnsureProfileSection = ctx.EnsureProfileSection
     local IsSafeToEdit = ctx.IsSafeToEdit
     local UIParentRect = ctx.UIParentRect
     local GetFrameSnapSize = ctx.GetFrameSnapSize
@@ -60,7 +56,10 @@ function InspectorModule.Create(ctx)
             editBox:SetPoint("LEFT", text, "RIGHT", 8, 0)
             editBox:SetTextInsets(6, 6, 0, 0)
             editBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-            editBox:SetScript("OnEnterPressed", function(self) self:ClearFocus() if f.OnCommit then f:OnCommit() end end)
+            editBox:SetScript("OnEnterPressed", function(self)
+                self:ClearFocus()
+                if f.OnCommit then f:OnCommit() end
+            end)
 
             return text, editBox
         end
@@ -145,22 +144,24 @@ function InspectorModule.Create(ctx)
 
     local function SetPosition(key, frame, x, y)
         if not key or not frame then
-            return
+            return false
         end
 
         if type(SetEditablePosition) == "function" then
             SetEditablePosition(key, frame, x, y)
-            return
+            return true
         end
 
         frame:ClearAllPoints()
         frame:SetPoint("CENTER", UIParent, "CENTER", x, y)
+        return true
     end
 
     local function RequestApplyForMover(key)
         if type(RequestApplyForRegisteredKey) == "function" then
-            RequestApplyForRegisteredKey(key)
+            return RequestApplyForRegisteredKey(key)
         end
+        return false
     end
 
     local function GetSpec(key)
@@ -191,12 +192,16 @@ function InspectorModule.Create(ctx)
     local function SetScaleValue(key, value)
         local spec = GetSpec(key)
         if not (spec and type(spec.setScale) == "function") then
-            return
+            return false
         end
 
         value = Clamp(tonumber(value) or 1, 0.60, 1.30)
-        spec.setScale(value, spec, key)
-        RequestApplyForMover(key)
+        local changed = spec.setScale(value, spec, key)
+        if changed == true then
+            RequestApplyForMover(key)
+            return true
+        end
+        return false
     end
 
     local function SupportsResize(key)
@@ -214,14 +219,35 @@ function InspectorModule.Create(ctx)
         return 160, 20
     end
 
+    local function PreviewResizeValue(key, w, h)
+        local spec = GetSpec(key)
+        if not spec then
+            return tonumber(w) or 160, tonumber(h) or 20
+        end
+
+        if type(spec.previewSize) == "function" then
+            local ok, previewW, previewH = spec.previewSize(w, h, spec, key)
+            if ok == true then
+                return tonumber(previewW) or tonumber(w) or 160,
+                    tonumber(previewH) or tonumber(h) or 20
+            end
+        end
+
+        return tonumber(w) or 160, tonumber(h) or 20
+    end
+
     local function SetResizeValue(key, w, h)
         local spec = GetSpec(key)
         if not (spec and type(spec.setSize) == "function") then
-            return
+            return false
         end
 
-        spec.setSize(w, h, spec, key)
-        RequestApplyForMover(key)
+        local changed = spec.setSize(w, h, spec, key)
+        if changed == true then
+            RequestApplyForMover(key)
+            return true
+        end
+        return false
     end
 
     local function ComputeWheelResizePair(w, h, delta, uniform)
@@ -251,8 +277,7 @@ function InspectorModule.Create(ctx)
 
         if (not altDown) and SupportsScale(key) then
             local scale = GetScaleValue(key)
-            SetScaleValue(key, scale + ((tonumber(delta) or 0) * 0.02))
-            return true
+            return SetScaleValue(key, scale + ((tonumber(delta) or 0) * 0.02))
         end
 
         if altDown and type(spec.onWheel) == "function" then
@@ -266,8 +291,7 @@ function InspectorModule.Create(ctx)
         if altDown and SupportsResize(key) then
             local w, h = GetResizeValue(key)
             local nw, nh = ComputeWheelResizePair(w, h, delta, shiftDown)
-            SetResizeValue(key, nw, nh)
-            return true
+            return SetResizeValue(key, nw, nh)
         end
 
         return false
@@ -302,7 +326,17 @@ function InspectorModule.Create(ctx)
             f.ew:Show()
             f.lh:Show()
             f.eh:Show()
-            local w, h = GetResizeValue(key)
+
+            local overlay = f._overlay
+            local w, h
+            if overlay and overlay._resizing
+                and type(overlay._previewW) == "number"
+                and type(overlay._previewH) == "number" then
+                w, h = overlay._previewW, overlay._previewH
+            else
+                w, h = GetResizeValue(key)
+            end
+
             if not f.ew:HasFocus() then f.ew:SetText(string.format("%d", math.floor(w + 0.5))) end
             if not f.eh:HasFocus() then f.eh:SetText(string.format("%d", math.floor(h + 0.5))) end
         else
@@ -381,6 +415,7 @@ function InspectorModule.Create(ctx)
         SupportsScale = SupportsScale,
         SupportsResize = SupportsResize,
         GetResizeValue = GetResizeValue,
+        PreviewResizeValue = PreviewResizeValue,
         SetResizeValue = SetResizeValue,
         GetScaleValue = GetScaleValue,
         SetScaleValue = SetScaleValue,

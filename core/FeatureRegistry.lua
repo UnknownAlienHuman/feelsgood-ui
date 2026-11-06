@@ -100,6 +100,7 @@ local APPLY_ORDER = Registry.APPLY_ORDER or {
     "actionbars",
     "companion",
     "minimap",
+    "movers",
 }
 
 local APPLY_CONTRACTS = Registry.APPLY_CONTRACTS or {
@@ -137,6 +138,16 @@ local APPLY_CONTRACTS = Registry.APPLY_CONTRACTS or {
         deferInCombat = true,
     },
     minimap = { feature = "minimap" },
+    movers = {
+        handler = function()
+            local movers = ns.Movers
+            if not (movers and type(movers.ApplyConfig) == "function") then
+                return false, "Movers.ApplyConfig unavailable"
+            end
+            return movers:ApplyConfig()
+        end,
+        deferInCombat = true,
+    },
 }
 
 local PANEL_ORDER = {
@@ -168,7 +179,7 @@ local PANEL_CONTRACTS = Registry.PANEL_CONTRACTS or {
         categoryKey = "edit",
         categoryId = "FGUI_EDIT",
         title = "Edit Mode",
-        applyKeys = "runtime",
+        applyKeys = "movers",
         resetLabel = "Reset Edit Mode",
         resetSections = { "movers", "editor" },
         contextSections = {
