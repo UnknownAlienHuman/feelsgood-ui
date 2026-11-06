@@ -1,4 +1,4 @@
--- FeelsGoodUI: atomic panel undo/reset operations
+-- FeelsGoodUI: atomic settings and panel transaction journal
 local _, ns = ...
 
 local Tx = {}
@@ -14,6 +14,7 @@ local U = ns.U
 local OriginalContext = Shared and Shared.CreateBuilderContext
 local OriginalBind = Shared and Shared.BindPanelApplyControls
 local OriginalInvalidateAll = Settings and Settings.InvalidateAllHistory
+local OriginalSetTx = Settings and Settings.SetTx
 local OriginalUndo = Settings and Settings.UndoPanel
 
 Tx._nextID = Tx._nextID or 0
@@ -24,6 +25,13 @@ local function Copy(value)
         return U.DeepCopy(value)
     end
     return value
+end
+
+local function CopyPath(path)
+    if type(path) ~= "table" or #path == 0 then return nil end
+    local out = {}
+    for i = 1, #path do out[i] = path[i] end
+    return out
 end
 
 local function UniqueStrings(value)
@@ -48,6 +56,52 @@ local function Profile()
         profile = DB:GetProfile()
     end
     return type(profile) == "table" and profile or nil
+end
+
+local function SnapshotPath(path)
+    local profile = Profile()
+    local copiedPath = CopyPath(path)
+    if not profile or not copiedPath then return nil end
+
+    local node = profile
+    for i = 1, #copiedPath - 1 do
+        if type(node) ~= "table" then return nil end
+        local key = copiedPath[i]
+        local child = node[key]
+        if child == nil then
+            return { path = copiedPath, branchDepth = i, existed = false }
+        end
+        if type(child) ~= "table" then
+            return { path = copiedPath, branchDepth = i, existed = true, value = Copy(child) }
+        end
+        node = child
+    end
+
+    if type(node) ~= "table" then return nil end
+    local key = copiedPath[#copiedPath]
+    return {
+        path = copiedPath,
+        existed = node[key] ~= nil,
+        value = Copy(node[key]),
+    }
+end
+
+local function RestorePath(snapshot)
+    local profile = Profile()
+    if not profile or type(snapshot) ~= "table" or type(snapshot.path) ~= "table" then return false end
+
+    local path = snapshot.path
+    local stop = snapshot.branchDepth or #path
+    local node = profile
+    for i = 1, stop - 1 do
+        local key = path[i]
+        if type(node[key]) ~= "table" then node[key] = {} end
+        node = node[key]
+    end
+
+    local key = path[stop]
+    node[key] = snapshot.existed and Copy(snapshot.value) or nil
+    return true
 end
 
 local function SnapshotSections(sections)
@@ -164,6 +218,7 @@ function Tx:Register(keys, transaction)
     transaction.id = self._nextID
     transaction.keys = normalized
     transaction.waiting = {}
+    transaction.committed = {}
 
     for i = 1, #normalized do
         local key = normalized[i]
@@ -184,6 +239,7 @@ function Tx:CommitKeys(keys)
             local key = normalized[j]
             if transaction.waiting[key] then
                 transaction.waiting[key] = nil
+                transaction.committed[key] = true
                 RemoveFromKey(transaction, key)
             end
         end
@@ -194,8 +250,8 @@ function Tx:CommitKeys(keys)
     for i = 1, #finished do
         local transaction = finished[i]
         Remove(transaction)
-        SafeCall("Panel transaction commit", transaction.commit)
-        SafeCall("Panel transaction onCommit", transaction.onCommit)
+        SafeCall("Settings transaction commit", transaction.commit)
+        SafeCall("Settings transaction onCommit", transaction.onCommit)
     end
     return #finished > 0
 end
@@ -204,21 +260,22 @@ function Tx:RollbackKeys(keys)
     local transactions = Gather(keys)
     table.sort(transactions, function(a, b) return a.id > b.id end)
 
-    local callbacks = {}
+    local callbacks, restoreKeys = {}, {}
     for i = 1, #transactions do
         local transaction = transactions[i]
         Remove(transaction)
-        SafeCall("Panel transaction rollback", transaction.rollback)
+        SafeCall("Settings transaction rollback", transaction.rollback)
+        for key in pairs(transaction.committed or {}) do restoreKeys[#restoreKeys + 1] = key end
         if type(transaction.onRollback) == "function" then
             callbacks[#callbacks + 1] = transaction.onRollback
         end
     end
-    return #callbacks > 0 and callbacks or nil
+    return (#callbacks > 0 and callbacks or nil), UniqueStrings(restoreKeys)
 end
 
 function Tx:RunRollbackCallbacks(callbacks)
     for i = 1, #(callbacks or {}) do
-        SafeCall("Panel transaction onRollback", callbacks[i])
+        SafeCall("Settings transaction onRollback", callbacks[i])
     end
 end
 
@@ -307,6 +364,18 @@ local function BindControls(applyState, undoBtn, resetBtn, resetSections, refres
                 SafeCall("Panel refresh", refreshFn)
             end
         end)
+    end
+end
+
+if Settings and type(OriginalSetTx) == "function" then
+    function Settings:SetTx(applyKeys, path, value, rule, panelKey)
+        local snapshot = SnapshotPath(path)
+        local changed, stored = OriginalSetTx(self, applyKeys, path, value, rule, panelKey)
+        local keys = UniqueStrings(applyKeys)
+        if changed == true and snapshot and #keys > 0 then
+            Tx:Register(keys, { rollback = function() RestorePath(snapshot) end })
+        end
+        return changed, stored
     end
 end
 
