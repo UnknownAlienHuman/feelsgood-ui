@@ -103,6 +103,10 @@ try {
     }
 
     assertBefore(tocEntries, 'core/Secret.lua', 'core/Utils.lua');
+    assertBefore(tocEntries, 'core/Settings.lua', 'core/Apply.lua');
+    assertBefore(tocEntries, 'core/Apply.lua', 'core/PanelTransactions.lua');
+    assertBefore(tocEntries, 'core/OptionsSharedHelpers.lua', 'core/PanelTransactions.lua');
+    assertBefore(tocEntries, 'core/PanelTransactions.lua', 'core/OptionsFieldBuilders.lua');
     assertBefore(tocEntries, 'modules/UnitFramesTarget.lua', 'modules/UnitFramesRender.lua');
     assertBefore(tocEntries, 'modules/UnitFramesRender.lua', 'modules/UnitFramesPolicy.lua');
     assertBefore(tocEntries, 'modules/CenterBarsRuntime.lua', 'modules/CenterBarsRender.lua');
