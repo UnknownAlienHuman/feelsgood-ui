@@ -49,7 +49,6 @@ local function GetApplyOrder()
     return FALLBACK_ORDER
 end
 
-
 local function _ErrHandler(err)
     local s = tostring(err)
     if _G and _G.debugstack then
@@ -79,15 +78,22 @@ local function SafeApplyKey(key, fn)
     end
 
     if type(fn) ~= "function" then
-        return true
+        return false, "Missing apply callback: " .. tostring(key)
     end
 
-    local ok, err = xpcall(fn, _ErrHandler)
+    local ok, result, detail = xpcall(fn, _ErrHandler)
     if perfOn and t0 then
         Perf:Time(key, NowMS() - t0)
         Perf:Inc("Apply:" .. tostring(key))
     end
-    return ok, err
+
+    if not ok then
+        return false, result
+    end
+    if result == false then
+        return false, detail or ("Apply returned false: " .. tostring(key))
+    end
+    return true
 end
 
 local function FinalizePending(keys, method)
@@ -103,30 +109,43 @@ local function FinalizePending(keys, method)
     end
 end
 
+local function CallFallback(object, method, key)
+    if not (object and type(object[method]) == "function") then
+        return false, "Missing fallback apply handler: " .. tostring(key)
+    end
+
+    local result, detail = object[method](object)
+    if result == false then
+        return false, detail or ("Fallback apply returned false: " .. tostring(key))
+    end
+    return true
+end
+
 local function ExecuteApplyKey(key)
     local currentApp = ns.App
     if currentApp and currentApp.ApplyByKey then
-        currentApp:ApplyByKey(key)
-        return
+        return currentApp:ApplyByKey(key)
     end
 
-    if key == "runtime" and DB and DB.ApplyRuntime then
-        DB:ApplyRuntime()
-    elseif key == "theme" and ns.Theme and ns.Theme.RefreshFromDB then
-        ns.Theme:RefreshFromDB()
-    elseif key == "unitframes" and ns.UF and ns.UF.ApplyConfig then
-        ns.UF:ApplyConfig()
-    elseif key == "center" and ns.Center and ns.Center.ApplyConfig then
-        ns.Center:ApplyConfig()
-    elseif key == "experience" and ns.ExperienceBar and ns.ExperienceBar.ApplyConfig then
-        ns.ExperienceBar:ApplyConfig()
-    elseif key == "actionbars" and ns.ActionBars and ns.ActionBars.ApplyConfig then
-        ns.ActionBars:ApplyConfig()
-    elseif key == "companion" and ns.Companion and ns.Companion.ApplyConfig then
-        ns.Companion:ApplyConfig()
-    elseif key == "minimap" and ns.MinimapIcon and ns.MinimapIcon.ApplyConfig then
-        ns.MinimapIcon:ApplyConfig()
+    if key == "runtime" then
+        return CallFallback(DB, "ApplyRuntime", key)
+    elseif key == "theme" then
+        return CallFallback(ns.Theme, "RefreshFromDB", key)
+    elseif key == "unitframes" then
+        return CallFallback(ns.UF, "ApplyConfig", key)
+    elseif key == "center" then
+        return CallFallback(ns.Center, "ApplyConfig", key)
+    elseif key == "experience" then
+        return CallFallback(ns.ExperienceBar, "ApplyConfig", key)
+    elseif key == "actionbars" then
+        return CallFallback(ns.ActionBars, "ApplyConfig", key)
+    elseif key == "companion" then
+        return CallFallback(ns.Companion, "ApplyConfig", key)
+    elseif key == "minimap" then
+        return CallFallback(ns.MinimapIcon, "ApplyConfig", key)
     end
+
+    return false, "Unknown apply key: " .. tostring(key)
 end
 
 local function RestoreRuntimeKeys(keys)
@@ -137,7 +156,7 @@ local function RestoreRuntimeKeys(keys)
     for i = 1, #keys do
         local key = keys[i]
         local ok, err = SafeApplyKey(key, function()
-            ExecuteApplyKey(key)
+            return ExecuteApplyKey(key)
         end)
         if not ok and Log and Log.Error then
             Log:Error("Apply restore failed [" .. tostring(key) .. "]: " .. tostring(err))
@@ -239,7 +258,7 @@ function Apply:Flush()
     for i = 1, #orderedKeys do
         local key = orderedKeys[i]
         local ok, err = SafeApplyKey(key, function()
-            ExecuteApplyKey(key)
+            return ExecuteApplyKey(key)
         end)
 
         if not ok then
