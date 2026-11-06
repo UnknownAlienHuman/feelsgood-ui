@@ -1,32 +1,39 @@
 # FeelsGoodUI
 
-Minimalist unit frames with custom action bars, center bars, companion controls, movers, settings, and profile support.
+Minimalist Retail UI addon with oUF unit frames, secure action bars, center resources, companion controls, movers, settings, and profile transfer.
 
-## Installation
+## Requirements
 
-Copy the `FeelsGoodUI` directory into `World of Warcraft/_retail_/Interface/AddOns/`. Install the required `oUF` addon separately, then restart the client or use `/reload`. Supporting libraries listed in the TOC are vendored.
-
-## Compatibility and data
-
-- Interface: `120001`, `120005`
-- Version: `0.0.40`
-- Required dependency: `oUF`
+- World of Warcraft Retail `12.1.5`
+- Interface `120105`
+- FeelsGoodUI `0.0.41`
+- External required dependency: `oUF`
 - Saved variables: `FeelsGoodUIDB`
 
-## Usage
+Copy the `FeelsGoodUI` directory into `World of Warcraft/_retail_/Interface/AddOns/`, install `oUF`, and restart the client or run `/reload`.
 
-Configuration, Edit Mode, minimap actions, and slash commands are implemented by the core settings, movers, options, and commands modules. Start with the in-game addon settings; see the source index for the corresponding modules.
+## Runtime policy
 
-## Development status
+Restricted/Secret Values are gated before Lua inspection. Ordinary data uses the existing render path; inaccessible health, power, class, classification, and rune values are routed only to documented native presentation sinks or an explicit unavailable state. Protected action-bar and Blizzard-frame mutations remain deferred outside combat.
 
-The tracked code execution blocks are marked implemented. Remaining work is in-game QA, including scenarios that validate partial architectural areas; those checks are not proven by static review. See [todo.md](todo.md) and [docs/REGRESSION_MATRIX_1_25.md](docs/REGRESSION_MATRIX_1_25.md).
+## Validation
+
+Run the deterministic static check from the addon root:
+
+```bash
+npm ci
+npm test
+```
+
+The checker parses first-party Lua, validates TOC paths and duplicates, and enforces critical load-order constraints. Static checks do not replace client validation; record each tested build and result in [`docs/REGRESSION_MATRIX_1_25.md`](docs/REGRESSION_MATRIX_1_25.md).
 
 ## Developer documentation
 
 - [Architecture](ARCHITECTURE.md)
 - [Code index](CODE_INDEX.md)
 - [Code graph](CODE_GRAPH.md)
+- [Active runtime checks](todo.md)
 
 ## License
 
-Licensed under the [MIT License](LICENSE). Bundled third-party components remain under their own notices.
+Licensed under the [MIT License](LICENSE). Bundled third-party components retain their own notices.

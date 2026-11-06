@@ -9,83 +9,84 @@ local U = ns.U
 local Secret = ns.Secret
 
 local IsSecretFn = (Secret and Secret.IsSecretValue) or _G.issecretvalue or _G.IsSecretValue
+local ABBREVIATOR_NAMES = {
+    "AbbreviateNumbers",
+    "AbbreviateLargeNumbers",
+    "AbbreviateNumber",
+    "AbbreviateLargeNumber",
+}
 
+local function CanInspect(v)
+    if Secret and Secret.CanAccess then
+        return Secret.CanAccess(v)
+    end
+    if type(IsSecretFn) == "function" then
+        return IsSecretFn(v) ~= true
+    end
+    return true
+end
+
+-- Kept under the historical name because render/target modules already use it
+-- as their opaque-value guard. A value that cannot be inspected is treated as
+-- opaque even when a separate secrecy classifier is unavailable.
 function Text.IsSecretValue(v)
+    if not CanInspect(v) then
+        return true
+    end
     if Secret and Secret.IsSecret then
         return Secret.IsSecret(v)
     end
-    return (IsSecretFn and IsSecretFn(v)) == true
+    if type(IsSecretFn) == "function" then
+        return IsSecretFn(v) == true
+    end
+    return false
 end
 
 function Text.SafeSetText(fs, v)
-    if not fs then return end
+    if not fs then return false end
 
     if Secret and Secret.SafeSetText then
-        Secret.SafeSetText(fs, v)
-        return
-    end
-
-    if not v then
-        fs:SetText("")
-        return
+        return Secret.SafeSetText(fs, v)
     end
 
     if Text.IsSecretValue(v) then
         fs:SetText(v)
-        return
+    elseif v == nil then
+        fs:SetText("")
+    else
+        fs:SetText(v)
     end
-
-    fs:SetText(v)
+    return true
 end
 
 function Text.FormatNumberShort(cache, v)
+    if Text.IsSecretValue(v) then
+        return nil
+    end
     local shortFmt = type(cache) == "table" and cache.shortFmt or nil
-    return U.FormatNumberShort(v, shortFmt) or ""
+    return U.FormatNumberShort(v, shortFmt)
 end
 
+-- Blizzard abbreviation helpers are used only for ordinary inputs. If a
+-- helper returns an opaque result, pass it through unchanged to SetText.
 function Text.TryBlizzardAbbrev(v)
-    local fns = {
-        _G.AbbreviateNumbers,
-        _G.AbbreviateLargeNumbers,
-        _G.AbbreviateNumber,
-        _G.AbbreviateLargeNumber,
-    }
+    if Text.IsSecretValue(v) then
+        return false, nil
+    end
 
-    for i = 1, #fns do
-        local fn = fns[i]
+    for i = 1, #ABBREVIATOR_NAMES do
+        local fn = _G[ABBREVIATOR_NAMES[i]]
         if type(fn) == "function" then
-            local ok, res = pcall(fn, v)
+            local ok, result = pcall(fn, v)
             if ok then
-                local okNil, isNil = pcall(function() return res == nil end)
-                if not (okNil and isNil) then
-                    local secretish = false
-                    local okSecret, isSecret = pcall(Text.IsSecretValue, res)
-                    if okSecret and isSecret == true then
-                        secretish = true
+                if Text.IsSecretValue(result) then
+                    return true, result
+                end
+                if result ~= nil then
+                    if type(result) == "string" then
+                        result = result:gsub("K", "k"):gsub("M", "m"):gsub("B", "b")
                     end
-
-                    if (not secretish) and Secret and type(Secret.CanAccessValue) == "function" then
-                        local okAccess, canAccess = pcall(Secret.CanAccessValue, res)
-                        if okAccess and canAccess == false then
-                            secretish = true
-                        end
-                    end
-
-                    if secretish then
-                        return true, res
-                    end
-
-                    local okType, valueType = pcall(type, res)
-                    if okType and valueType == "string" then
-                        local okNormalize, normalized = pcall(function()
-                            return (res:gsub("K", "k"):gsub("M", "m"):gsub("B", "b"))
-                        end)
-                        if okNormalize and normalized ~= nil then
-                            return true, normalized
-                        end
-                    end
-
-                    return true, res
+                    return true, result
                 end
             end
         end

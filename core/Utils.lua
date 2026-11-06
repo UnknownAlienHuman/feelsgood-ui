@@ -1,11 +1,8 @@
 -- FeelsGoodUI: Utilities
 --
--- IMPORTANT (WoW 12.0+): "Secret Values" may have type(v)=="number" but throw on
--- arithmetic/comparisons/tonumber/string.format("%d", v), etc.
---
--- Policy:
---  - Only treat something as a *plain number* if it survives a trivial arithmetic op in pcall.
---  - Any helper that performs math/comparisons must use pcall or first convert via TryNumber.
+-- Retail 12.1.5 Secret Values must be gated before nil/equality checks, type,
+-- arithmetic, comparison, conversion, formatting, logging, or persistence.
+-- pcall is error containment only; it is never an access probe.
 
 local _, ns = ...
 
@@ -13,55 +10,54 @@ local U = {}
 ns.U = U
 
 local Secret = ns.Secret
+local EMPTY_OPTIONS = {}
+local SHORT_UNITS = {
+    { 1e9, "b" },
+    { 1e6, "m" },
+    { 1e3, "k" },
+}
 
 -- -----------------------------
 -- Secret-safe numeric helpers
 -- -----------------------------
 
-local function IsFinitePlainNumber(n)
-    if type(n) ~= "number" then return false end
-    local ok, finite = pcall(function()
-        -- Reject NaN and infinities to avoid rare formatting/math explosions in hot paths.
-        return (n == n) and (n < math.huge) and (n > -math.huge)
-    end)
-    return ok and finite == true
+local function CanInspect(v)
+    if Secret and Secret.CanAccess then
+        return Secret.CanAccess(v)
+    end
+    if Secret and Secret.IsSecret and Secret.IsSecret(v) then
+        return false
+    end
+    return true
 end
 
---- Try to obtain a safe Lua number.
+local function IsFinitePlainNumber(n)
+    return type(n) == "number"
+        and n == n
+        and n < math.huge
+        and n > -math.huge
+end
+
+--- Try to obtain an ordinary Lua number.
 -- Returns: ok:boolean, n:number|nil
 function U.TryNumber(v)
-    if v == nil then return false, nil end
+    if not CanInspect(v) then
+        return false, nil
+    end
+    if v == nil then
+        return false, nil
+    end
 
-    -- WoW 12.x Secret Values may present as type=="number" but will throw on
-    -- comparisons/arithmetic. We only treat a value as a plain number if it
-    -- survives a trivial comparison inside pcall.
-    if type(v) == "number" then
-        -- If we have explicit secret detection (oUF / issecretvalue), prefer it.
-        if Secret and Secret.IsSecret and Secret.IsSecret(v) then
-            return false, nil
-        end
-
-        -- Use arithmetic (v + 0) rather than comparisons.
-        -- Secret Values can sometimes survive comparisons but fail on math/formatting.
-        local ok = pcall(function() return v + 0 end)
-        if ok and IsFinitePlainNumber(v) then
+    local valueType = type(v)
+    if valueType == "number" then
+        if IsFinitePlainNumber(v) then
             return true, v
         end
         return false, nil
     end
 
-    if type(v) == "string" then
+    if valueType == "string" then
         local n = tonumber(v)
-        if IsFinitePlainNumber(n) then
-            return true, n
-        end
-        return false, nil
-    end
-
-    -- Last resort: guarded tostring->tonumber for unusual userdata.
-    local okS, s = pcall(tostring, v)
-    if okS and type(s) == "string" then
-        local n = tonumber(s)
         if IsFinitePlainNumber(n) then
             return true, n
         end
@@ -76,24 +72,24 @@ function U.IsPlainNumber(v)
 end
 
 function U.SafeToString(v)
-    local ok, s = pcall(tostring, v)
-    if ok then return s end
-    return ""
+    if not CanInspect(v) then
+        return ""
+    end
+    if v == nil then
+        return ""
+    end
+    return tostring(v)
 end
 
 function U.Clamp(n, minV, maxV)
     local okN, nn = U.TryNumber(n)
     if not okN then return n end
 
-    if minV ~= nil then
-        local okMin, mn = U.TryNumber(minV)
-        if okMin and nn < mn then nn = mn end
-    end
+    local okMin, mn = U.TryNumber(minV)
+    if okMin and nn < mn then nn = mn end
 
-    if maxV ~= nil then
-        local okMax, mx = U.TryNumber(maxV)
-        if okMax and nn > mx then nn = mx end
-    end
+    local okMax, mx = U.TryNumber(maxV)
+    if okMax and nn > mx then nn = mx end
 
     return nn
 end
@@ -108,15 +104,11 @@ function U.ClampWithFallback(n, minV, maxV, fallback)
         nn = fn
     end
 
-    if minV ~= nil then
-        local okMin, mn = U.TryNumber(minV)
-        if okMin and nn < mn then nn = mn end
-    end
+    local okMin, mn = U.TryNumber(minV)
+    if okMin and nn < mn then nn = mn end
 
-    if maxV ~= nil then
-        local okMax, mx = U.TryNumber(maxV)
-        if okMax and nn > mx then nn = mx end
-    end
+    local okMax, mx = U.TryNumber(maxV)
+    if okMax and nn > mx then nn = mx end
 
     return nn
 end
@@ -124,13 +116,7 @@ end
 function U.Round(n)
     local okN, nn = U.TryNumber(n)
     if not okN then return n end
-
-    local ok, r = pcall(function()
-        return math.floor(nn + 0.5)
-    end)
-
-    if ok then return r end
-    return n
+    return math.floor(nn + 0.5)
 end
 
 -- -----------------------------
@@ -141,7 +127,8 @@ end
 --
 -- Returns: string|nil
 --  - string: formatted value
---  - nil: not a plain number (caller should fallback to Secret-safe SetText)
+--  - nil: value is unavailable for Lua inspection; caller should use a direct
+--    visual sink or an explicit unavailable state.
 --
 -- opts:
 --  - hideZero: boolean (default false)
@@ -149,29 +136,26 @@ end
 --  - decimalsSmall: number (default 1) decimals when unit value < 10
 --  - decimalsLarge: number (default 0) decimals when unit value >= 10
 function U.FormatNumberShort(v, opts)
+    -- Formatting is not an opaque sink. Return an explicit unavailable display
+    -- state so callers never fall through to exception-based format probes.
+    if not CanInspect(v) then return "" end
+
     local ok, n = U.TryNumber(v)
     if not ok then return nil end
 
-    opts = opts or {}
+    opts = opts or EMPTY_OPTIONS
     if opts.hideZero and n == 0 then return "" end
 
     local abs = math.abs(n)
     local sign = (n < 0) and "-" or ""
 
-    -- < 1000: show integer (no separators)
     if abs < 1000 then
         return sign .. tostring(U.Round(abs))
     end
 
-    local units = {
-        { 1e9,  "b" },
-        { 1e6,  "m" },
-        { 1e3,  "k" },
-    }
-
-    local idx = #units
-    for i = 1, #units do
-        if abs >= units[i][1] then
+    local idx = #SHORT_UNITS
+    for i = 1, #SHORT_UNITS do
+        if abs >= SHORT_UNITS[i][1] then
             idx = i
             break
         end
@@ -187,9 +171,9 @@ function U.FormatNumberShort(v, opts)
     if decimalsLarge < 0 then decimalsLarge = 0 end
     if decimalsLarge > 2 then decimalsLarge = 2 end
 
-    -- Promote when rounding crosses 1000 (e.g. 999.5k -> 1.0m)
+    -- Promote when rounding crosses 1000 (for example, 999.5k -> 1m).
     while idx > 1 do
-        local unitVal = units[idx][1]
+        local unitVal = SHORT_UNITS[idx][1]
         local base = abs / unitVal
         local decimals = (base < 10) and decimalsSmall or decimalsLarge
         local pow10 = (decimals == 0) and 1 or (10 ^ decimals)
@@ -201,8 +185,8 @@ function U.FormatNumberShort(v, opts)
         end
     end
 
-    local unitVal = units[idx][1]
-    local suffix = units[idx][2]
+    local unitVal = SHORT_UNITS[idx][1]
+    local suffix = SHORT_UNITS[idx][2]
     if opts.suffixCase == "upper" then
         suffix = string.upper(suffix)
     end
@@ -215,7 +199,6 @@ function U.FormatNumberShort(v, opts)
     local fmt = string.format("%%.%df", decimals)
     local s = string.format(fmt, rounded)
     if decimals > 0 then
-        -- Strip trailing ".0" to match expected style (e.g. 1.0m -> 1m)
         s = s:gsub("%.0+$", "")
     end
 
@@ -253,7 +236,6 @@ function U.DeepCopy(src, dst, seen)
 end
 
 function U.MergeDefaults(dst, defaults)
-    -- Merge `defaults` into `dst` recursively without overriding existing keys.
     if type(dst) ~= "table" then dst = {} end
     if type(defaults) ~= "table" then return dst end
 
@@ -275,7 +257,6 @@ end
 -- Textures
 -- -----------------------------
 
--- Texture coords helper: remove rounded corners from icons.
 function U.IconTexCoord(inset)
     local okInset, ii = U.TryNumber(inset)
     if not okInset then ii = 0.08 end

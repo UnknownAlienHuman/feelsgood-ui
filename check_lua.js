@@ -1,56 +1,121 @@
+'use strict';
+
 const fs = require('fs');
 const path = require('path');
 const luaparse = require('luaparse');
 
-function walk(dir, done) {
-    let results = [];
-    fs.readdir(dir, function (err, list) {
-        if (err) return done(err);
-        let pending = list.length;
-        if (!pending) return done(null, results);
-        list.forEach(function (file) {
-            if (file === 'node_modules' || file === '.git' || file === 'libs') {
-                if (!--pending) done(null, results);
-                return;
-            }
-            file = path.resolve(dir, file);
-            fs.stat(file, function (err, stat) {
-                if (stat && stat.isDirectory()) {
-                    walk(file, function (err, res) {
-                        results = results.concat(res);
-                        if (!--pending) done(null, results);
-                    });
-                } else {
-                    if (file.endsWith('.lua')) {
-                        results.push(file);
-                    }
-                    if (!--pending) done(null, results);
-                }
-            });
-        });
-    });
+const ROOT = process.cwd();
+const TOC_PATH = path.join(ROOT, 'FeelsGoodUI.toc');
+const SKIP_DIRS = new Set(['.git', 'node_modules', 'libs']);
+const errors = [];
+
+function relative(file) {
+    return path.relative(ROOT, file).split(path.sep).join('/');
 }
 
-walk('.', function (err, results) {
-    if (err) throw err;
-    let errors = 0;
-    for (const file of results) {
-        const code = fs.readFileSync(file, 'utf8');
-        try {
-            luaparse.parse(code, { wait: false, scope: true, locations: true, ranges: true });
-        } catch (e) {
-            console.error(`SYNTAX ERROR in ${file}:`);
-            console.error(e.message);
-            const lines = code.split('\n');
-            if (e.line) {
-                console.error(`> ${lines[e.line - 1]}`);
-            }
-            errors++;
+function walk(dir, output) {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (entry.isDirectory() && SKIP_DIRS.has(entry.name)) continue;
+
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+            walk(fullPath, output);
+        } else if (entry.isFile() && entry.name.endsWith('.lua')) {
+            output.push(fullPath);
         }
     }
-    if (errors === 0) {
-        console.log('All files parsed successfully!');
-    } else {
-        console.log(`Found ${errors} syntax error(s).`);
+}
+
+function parseLua(file) {
+    const code = fs.readFileSync(file, 'utf8');
+    try {
+        luaparse.parse(code, {
+            comments: false,
+            locations: true,
+            luaVersion: '5.1',
+            scope: true,
+        });
+    } catch (error) {
+        const location = error.line ? `:${error.line}:${error.column || 0}` : '';
+        errors.push(`${relative(file)}${location}: ${error.message}`);
     }
-});
+}
+
+function readToc() {
+    if (!fs.existsSync(TOC_PATH)) {
+        errors.push('FeelsGoodUI.toc: missing');
+        return [];
+    }
+
+    const seen = new Map();
+    const entries = [];
+    const lines = fs.readFileSync(TOC_PATH, 'utf8').split(/\r?\n/);
+
+    lines.forEach((raw, index) => {
+        const value = raw.trim();
+        if (!value || value.startsWith('#')) return;
+
+        const normalized = value.replace(/\\/g, '/');
+        if (!/\.(lua|xml)$/i.test(normalized)) return;
+
+        const previous = seen.get(normalized);
+        if (previous) {
+            errors.push(`FeelsGoodUI.toc:${index + 1}: duplicate '${normalized}' (first at line ${previous})`);
+            return;
+        }
+
+        seen.set(normalized, index + 1);
+        entries.push(normalized);
+
+        if (!fs.existsSync(path.join(ROOT, normalized))) {
+            errors.push(`FeelsGoodUI.toc:${index + 1}: missing '${normalized}'`);
+        }
+    });
+
+    return entries;
+}
+
+function assertBefore(entries, first, second) {
+    const firstIndex = entries.indexOf(first);
+    const secondIndex = entries.indexOf(second);
+    if (firstIndex < 0 || secondIndex < 0 || firstIndex >= secondIndex) {
+        errors.push(`FeelsGoodUI.toc: expected '${first}' before '${second}'`);
+    }
+}
+
+try {
+    const luaFiles = [];
+    walk(ROOT, luaFiles);
+    luaFiles.sort();
+    luaFiles.forEach(parseLua);
+
+    const tocEntries = readToc();
+    const tocSet = new Set(tocEntries);
+
+    for (const file of luaFiles) {
+        const name = relative(file);
+        const firstParty = name === 'FeelsGoodUI.lua'
+            || name.startsWith('core/')
+            || name.startsWith('modules/');
+        if (firstParty && !tocSet.has(name)) {
+            errors.push(`FeelsGoodUI.toc: first-party Lua file is not loaded: '${name}'`);
+        }
+    }
+
+    assertBefore(tocEntries, 'core/Secret.lua', 'core/Utils.lua');
+    assertBefore(tocEntries, 'modules/UnitFramesRender.lua', 'modules/UnitFramesRestricted.lua');
+    assertBefore(tocEntries, 'modules/UnitFramesRestricted.lua', 'modules/UnitFramesPolicy.lua');
+    assertBefore(tocEntries, 'modules/CenterBarsRender.lua', 'modules/CenterBarsRestricted.lua');
+    assertBefore(tocEntries, 'modules/CenterBarsRestricted.lua', 'modules/CenterBars.lua');
+
+    if (errors.length > 0) {
+        for (const error of errors) console.error(error);
+        console.error(`Validation failed with ${errors.length} error(s).`);
+        process.exitCode = 1;
+    } else {
+        console.log(`Validation passed: ${luaFiles.length} Lua files, ${tocEntries.length} TOC entries.`);
+    }
+} catch (error) {
+    console.error(error && error.stack ? error.stack : String(error));
+    process.exitCode = 1;
+}
