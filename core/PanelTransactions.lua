@@ -370,10 +370,16 @@ end
 if Settings and type(OriginalSetTx) == "function" then
     function Settings:SetTx(applyKeys, path, value, rule, panelKey)
         local snapshot = SnapshotPath(path)
+        local history = SnapshotHistory(panelKey)
         local changed, stored = OriginalSetTx(self, applyKeys, path, value, rule, panelKey)
         local keys = UniqueStrings(applyKeys)
         if changed == true and snapshot and #keys > 0 then
-            Tx:Register(keys, { rollback = function() RestorePath(snapshot) end })
+            Tx:Register(keys, {
+                rollback = function()
+                    RestorePath(snapshot)
+                    if history then RestoreHistory(history) end
+                end,
+            })
         end
         return changed, stored
     end
