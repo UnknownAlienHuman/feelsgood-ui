@@ -57,6 +57,19 @@ local function RestoreThemeTokens(snapshot)
     return true
 end
 
+local function RestoreThemeConsumers(appliedModules, failedModule)
+    if failedModule and type(failedModule.ApplyConfig) == "function" then
+        pcall(failedModule.ApplyConfig, failedModule)
+    end
+
+    for i = #appliedModules, 1, -1 do
+        local module = appliedModules[i]
+        if module and type(module.ApplyConfig) == "function" then
+            pcall(module.ApplyConfig, module)
+        end
+    end
+end
+
 App._warned = App._warned or {}
 App._featureOrder = App._featureOrder or {
     "unitframes",
@@ -119,12 +132,13 @@ function App:ApplyTheme()
     local registry = GetRegistry()
     local consumers = (registry and registry.GetThemeConsumers and registry:GetThemeConsumers()) or {}
 
-    local okTheme, themeErr = pcall(function()
-        CallMethod(ns.Theme, "RefreshFromDB")
+    local okTheme, themeResult = pcall(function()
+        return CallMethod(ns.Theme, "RefreshFromDB")
     end)
-    if not okTheme then
+    if not okTheme or themeResult == false then
         RestoreThemeTokens(snapshot)
-        error(themeErr, 0)
+        local reason = okTheme and "Theme.RefreshFromDB returned false" or themeResult
+        error(reason, 0)
     end
 
     -- Shared media/theme tokens are owned by Theme; fan-out to runtime modules
@@ -132,18 +146,22 @@ function App:ApplyTheme()
     for i = 1, #consumers do
         local module = consumers[i]
         if module and type(module.ApplyConfig) == "function" then
-            local ok, err = pcall(module.ApplyConfig, module)
-            if not ok then
+            local ok, result, detail = pcall(module.ApplyConfig, module)
+            if not ok or result == false then
                 RestoreThemeTokens(snapshot)
-                for j = 1, #appliedModules do
-                    local applied = appliedModules[j]
-                    pcall(applied.ApplyConfig, applied)
+                RestoreThemeConsumers(appliedModules, module)
+
+                local reason = result
+                if ok then
+                    reason = detail or ("Theme consumer returned false: " .. tostring(module._lifecycleName or i))
                 end
-                error(err, 0)
+                error(reason, 0)
             end
             appliedModules[#appliedModules + 1] = module
         end
     end
+
+    return true
 end
 
 function App:BuildApplySpecs()
@@ -194,9 +212,13 @@ function App:ApplyByKey(key)
     local spec = self:GetApplySpec(key)
     local handler = spec and spec.handler
     if type(handler) ~= "function" then
-        return false
+        return false, "No apply handler for key: " .. tostring(key)
     end
-    handler()
+
+    local result, detail = handler()
+    if result == false then
+        return false, detail or ("Apply handler returned false: " .. tostring(key))
+    end
     return true
 end
 
