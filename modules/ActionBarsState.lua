@@ -8,6 +8,10 @@ local Movers = ns.Movers
 
 local InCombat = InCombatLockdown or function() return false end
 
+local function IsDetached(module)
+    return type(module) ~= "table" or module._detached == true
+end
+
 local function SetMouseEnabledSafe(frame, enabled)
     if not frame or type(frame.EnableMouse) ~= "function" then
         return
@@ -67,6 +71,9 @@ local function EnsureStateLayers(btn)
     if pushed then pushed:SetAlpha(0) end
 
     btn:HookScript("OnEnter", function(b)
+        if b._fguiModule and b._fguiModule._detached == true then
+            return
+        end
         if b.__fguiHL then b.__fguiHL:Show() end
     end)
     btn:HookScript("OnLeave", function(b)
@@ -118,6 +125,7 @@ end
 
 local function UpdateEmptySlot(btn)
     if not btn or not btn._fguiSkinned then return end
+    if btn._fguiModule and btn._fguiModule._detached == true then return end
     EnsureSlotBG(btn)
 
     local holder = btn.GetParent and btn:GetParent() or nil
@@ -145,6 +153,7 @@ end
 
 local function UpdateButtonChecked(btn)
     if not (btn and btn.__fguiCK) then return end
+    if btn._fguiModule and btn._fguiModule._detached == true then return end
 
     local checked = false
     if btn.GetChecked then
@@ -181,12 +190,14 @@ function State.AttachButtonAutoHideHooks(btn, module)
         return
     end
 
+    local owner = module or ns.ActionBars
+    btn._fguiModule = owner
     btn._fguiAutoHideHooks = true
     btn:HookScript("OnEnter", function()
-        State.QueueAutoHideUpdate(module or ns.ActionBars)
+        State.QueueAutoHideUpdate(owner)
     end)
     btn:HookScript("OnLeave", function()
-        State.QueueAutoHideUpdate(module or ns.ActionBars)
+        State.QueueAutoHideUpdate(owner)
     end)
 end
 
@@ -218,7 +229,7 @@ function State.SetHolderAutoHidden(holder, hidden)
 end
 
 function State.IsAnyHolderHovered(module)
-    if type(module) ~= "table" or type(module._ForEachHolder) ~= "function" then
+    if IsDetached(module) or type(module._ForEachHolder) ~= "function" then
         return false
     end
 
@@ -232,15 +243,31 @@ function State.IsAnyHolderHovered(module)
     return hovered
 end
 
+local function InvalidateAutoHideQueue(module)
+    if type(module) ~= "table" then
+        return
+    end
+    module._autoHideGeneration = (module._autoHideGeneration or 0) + 1
+    module._autoHideQueued = nil
+end
+
 function State.QueueAutoHideUpdate(module)
-    if type(module) ~= "table" or module._autoHideQueued then
+    if IsDetached(module) or module._autoHideQueued then
         return
     end
 
+    local generation = (module._autoHideGeneration or 0) + 1
+    module._autoHideGeneration = generation
     module._autoHideQueued = true
 
     local function Flush()
-        module._autoHideQueued = false
+        if module._autoHideGeneration ~= generation then
+            return
+        end
+        module._autoHideQueued = nil
+        if IsDetached(module) then
+            return
+        end
         State.UpdateAutoHideState(module)
     end
 
@@ -251,8 +278,27 @@ function State.QueueAutoHideUpdate(module)
     end
 end
 
+function State.ResetAutoHideState(module)
+    if type(module) ~= "table" then
+        return
+    end
+
+    InvalidateAutoHideQueue(module)
+    module._autoHideEnabled = false
+
+    if type(module._ForEachHolder) ~= "function" then
+        return
+    end
+
+    module:_ForEachHolder(function(holder)
+        if holder then
+            State.SetHolderAutoHidden(holder, false)
+        end
+    end)
+end
+
 function State.UpdateAutoHideState(module)
-    if type(module) ~= "table" or type(module._ForEachHolder) ~= "function" then
+    if IsDetached(module) or type(module._ForEachHolder) ~= "function" then
         return
     end
 
@@ -274,7 +320,7 @@ function State.UpdateAutoHideState(module)
 end
 
 function State.EnsureAutoHideHooks(module)
-    if type(module) ~= "table" or module._autoHideHooksAttached or type(module._ForEachHolder) ~= "function" then
+    if IsDetached(module) or module._autoHideHooksAttached or type(module._ForEachHolder) ~= "function" then
         return
     end
 
@@ -295,8 +341,8 @@ function State.EnsureAutoHideHooks(module)
     end)
 end
 
-local function RunButtonVisualSync(btn, updateChecked, updateEmpty)
-    if not btn then return end
+local function RunButtonVisualSync(module, btn, updateChecked, updateEmpty)
+    if IsDetached(module) or not btn then return end
     local visuals = ns.ActionBarsVisuals
     if type(visuals) == "table" and type(visuals.RefreshButtonVisualState) == "function" then
         if visuals.RefreshButtonVisualState(btn) then
@@ -322,12 +368,12 @@ function State.EnsureStateHooks(module)
     if type(actionButtonMixin) == "table" then
         if type(actionButtonMixin.UpdateState) == "function" then
             hooksecurefunc(actionButtonMixin, "UpdateState", function(btn)
-                RunButtonVisualSync(btn, true, true)
+                RunButtonVisualSync(module, btn, true, true)
             end)
         end
         if type(actionButtonMixin.UpdateUsable) == "function" then
             hooksecurefunc(actionButtonMixin, "UpdateUsable", function(btn)
-                RunButtonVisualSync(btn, false, true)
+                RunButtonVisualSync(module, btn, false, true)
             end)
         end
     end
@@ -335,13 +381,14 @@ function State.EnsureStateHooks(module)
     local hasActionChangedCallback = _G.EventRegistry and type(_G.EventRegistry.RegisterCallback) == "function"
     if (not hasActionChangedCallback) and type(actionButtonMixin) == "table" and type(actionButtonMixin.UpdateAction) == "function" then
         hooksecurefunc(actionButtonMixin, "UpdateAction", function(btn)
-            RunButtonVisualSync(btn, true, true)
+            RunButtonVisualSync(module, btn, true, true)
         end)
     end
 
     local baseActionButtonMixin = _G.BaseActionButtonMixin
     if type(baseActionButtonMixin) == "table" and type(baseActionButtonMixin.SetShowGrid) == "function" then
         hooksecurefunc(baseActionButtonMixin, "SetShowGrid", function(btn)
+            if IsDetached(module) then return end
             if btn and btn.__fguiUpdateEmpty then
                 btn.__fguiUpdateEmpty(btn)
             end
@@ -350,6 +397,7 @@ function State.EnsureStateHooks(module)
 
     if Movers and type(Movers.SetUnlocked) == "function" then
         hooksecurefunc(Movers, "SetUnlocked", function()
+            if IsDetached(module) then return end
             State.RefreshEmptySlots(module)
             State.UpdateAutoHideState(module)
         end)
@@ -358,7 +406,7 @@ function State.EnsureStateHooks(module)
     local spellAlertManager = _G.ActionButtonSpellAlertManager
     if type(spellAlertManager) == "table" and type(spellAlertManager.ShowAlert) == "function" then
         hooksecurefunc(spellAlertManager, "ShowAlert", function(_, btn)
-            if not btn then return end
+            if IsDetached(module) or not btn then return end
             if btn.__fguiPR then btn.__fguiPR:Show() end
             local overlay = btn.SpellActivationAlert or btn.overlay
             if overlay and overlay.SetAlpha then
@@ -370,6 +418,7 @@ function State.EnsureStateHooks(module)
 
     if type(spellAlertManager) == "table" and type(spellAlertManager.HideAlert) == "function" then
         hooksecurefunc(spellAlertManager, "HideAlert", function(_, btn)
+            if IsDetached(module) then return end
             if btn and btn.__fguiPR then
                 btn.__fguiPR:Hide()
             end
@@ -378,7 +427,7 @@ function State.EnsureStateHooks(module)
 end
 
 function State.RefreshEmptySlots(module)
-    if type(module) ~= "table" or not module.bars then
+    if IsDetached(module) or not module.bars then
         return
     end
 
