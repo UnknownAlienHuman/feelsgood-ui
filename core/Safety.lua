@@ -106,7 +106,9 @@ function Safety.CancelDebounce(key)
     timers[key] = nil
     NextTimerGeneration(key)
 
-    if type(pending) == "table" and type(pending.Cancel) == "function" then
+    local pendingType = type(pending)
+    if (pendingType == "table" or pendingType == "userdata")
+        and type(pending.Cancel) == "function" then
         pcall(pending.Cancel, pending)
     end
 
