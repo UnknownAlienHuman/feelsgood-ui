@@ -5,7 +5,8 @@
 | `FeelsGoodUI.toc` | Metadata, dependency, and load order. |
 | `FeelsGoodUI.lua` | Final addon entry file. |
 | `core/Bootstrap.lua`, `core/Events.lua`, `core/Lifecycle.lua`, `core/App.lua` | Namespace, lifecycle, event handling, and feature orchestration. |
-| `core/DB.lua`, `core/Schema.lua`, `core/Settings.lua`, `core/Apply.lua` | Saved variables, migrations, setting writes, and configuration application. |
+| `core/DB.lua`, `core/Schema.lua`, `core/Settings.lua`, `core/Apply.lua` | Saved variables, migrations, validated setting writes, apply ordering, and runtime restoration. |
+| `core/PanelTransactions.lua` | Ordered `SetTx`/undo/reset journal, ownership-aware rollback, multi-key commit tracking, undo-history repair, and panel refresh callbacks. |
 | `core/Options*.lua`, `core/Movers*.lua` | Settings pages and frame editing/movement UI. |
 | `core/FeatureRegistry.lua` | Feature definitions and apply order. |
 | `modules/UnitFrames*.lua` | Unit-frame runtime, render, policy, target, and text behavior. |

@@ -6,6 +6,7 @@ local Shared = ns.OptionsShared or {}
 local BuildPanelContext = Shared.BuildPanelContext
 local GetPanelContract = Shared.GetPanelContract
 local ResetProfileSections = Shared.ResetProfileSections
+local PanelTransactions = ns.PanelTransactions
 
 local function BuildPanel_EditMode()
     local ctxFactory = Shared.CreateBuilderContext
@@ -14,6 +15,7 @@ local function BuildPanel_EditMode()
     end
 
     local ctx = ctxFactory()
+    local Apply = ctx.Apply
     local Movers = ctx.Movers
     local Settings = ctx.Settings
     local CreateScrollablePanel = ctx.CreateScrollablePanel
@@ -32,6 +34,7 @@ local function BuildPanel_EditMode()
 
     local PANEL_KEY = "editmode"
     local panelContract = (type(GetPanelContract) == "function") and GetPanelContract(PANEL_KEY) or nil
+    local APPLY_KEYS = (panelContract and panelContract.applyKeys) or "runtime"
     local RESET_SECTIONS = (panelContract and panelContract.resetSections) or { "movers", "editor" }
 
     local Refresh
@@ -165,20 +168,45 @@ local function BuildPanel_EditMode()
         end
     end
 
+    local function RefreshAfterTransaction()
+        SyncMoversFromProfile()
+        Refresh()
+    end
+
+    local function RequestRuntimeApply()
+        if Apply and type(Apply.Request) == "function" then
+            Apply:Request(APPLY_KEYS)
+        end
+    end
+
     undoBtn:SetScript("OnClick", function()
+        if PanelTransactions and type(PanelTransactions.UndoPanel) == "function" then
+            if PanelTransactions:UndoPanel(PANEL_KEY, APPLY_KEYS, { onRollback = RefreshAfterTransaction }) then
+                RequestRuntimeApply()
+                RefreshAfterTransaction()
+            end
+            return
+        end
+
         if Settings and Settings.UndoPanel and Settings:UndoPanel(PANEL_KEY) then
-            SyncMoversFromProfile()
-            Refresh()
+            RefreshAfterTransaction()
         end
     end)
 
     resetSectionBtn:SetScript("OnClick", function()
+        if PanelTransactions and type(PanelTransactions.ResetSections) == "function" then
+            if PanelTransactions:ResetSections(PANEL_KEY, RESET_SECTIONS, APPLY_KEYS, { onRollback = RefreshAfterTransaction }) then
+                RequestRuntimeApply()
+                RefreshAfterTransaction()
+            end
+            return
+        end
+
         if type(ResetProfileSections) == "function" and ResetProfileSections(RESET_SECTIONS) then
             if Settings and Settings.InvalidatePanelHistory then
-                Settings:InvalidatePanelHistory(PANEL_KEY, (panelContract and panelContract.applyKeys) or "runtime")
+                Settings:InvalidatePanelHistory(PANEL_KEY, APPLY_KEYS)
             end
-            SyncMoversFromProfile()
-            Refresh()
+            RefreshAfterTransaction()
         end
     end)
 

@@ -15,12 +15,11 @@ local _, ns = ...
 local Apply = {}
 ns.Apply = Apply
 
-local DB     = ns.DB
+local DB = ns.DB
 local Safety = ns.Safety
-local Log    = ns.Log
+local Log = ns.Log
 local Settings = ns.Settings
-
-local Perf   = ns.Perf
+local Perf = ns.Perf
 
 local DEBOUNCE_KEY = "FGUI_APPLY_QUEUE"
 
@@ -47,6 +46,31 @@ local function GetApplyOrder()
         end
     end
     return FALLBACK_ORDER
+end
+
+local function BuildOrderedKeys(snapshot)
+    local out, seen = {}, {}
+
+    for _, key in ipairs(GetApplyOrder()) do
+        if snapshot[key] and not seen[key] then
+            seen[key] = true
+            out[#out + 1] = key
+        end
+    end
+
+    local extras = {}
+    for key, value in pairs(snapshot) do
+        if value == true and type(key) == "string" and key ~= "" and not seen[key] then
+            extras[#extras + 1] = key
+        end
+    end
+    table.sort(extras)
+
+    for i = 1, #extras do
+        out[#out + 1] = extras[i]
+    end
+
+    return out
 end
 
 local function _ErrHandler(err)
@@ -104,16 +128,44 @@ local function SafeApplyKey(key, fn)
 end
 
 local function FinalizePending(keys, method)
-    if type(keys) ~= "table" or not Settings or type(Settings[method]) ~= "function" then
-        return
+    if type(keys) ~= "table" or #keys == 0 then
+        return nil
     end
 
-    for i = 1, #keys do
-        local key = keys[i]
-        if type(key) == "string" and key ~= "" then
-            Settings[method](Settings, key)
+    local transactions = ns.PanelTransactions
+    if method == "Rollback"
+        and transactions
+        and type(transactions.RollbackKeys) == "function" then
+        -- PanelTransactions journals both scalar SetTx writes and higher-level
+        -- undo/reset snapshots in one sequence. Clear Settings' legacy pending
+        -- lists without replaying a second, differently ordered rollback.
+        local callbacks, committedKeys = transactions:RollbackKeys(keys)
+        if Settings and type(Settings.Commit) == "function" then
+            for i = 1, #keys do
+                Settings:Commit(keys[i])
+            end
+        end
+        if type(transactions.RunRollbackCallbacks) == "function" then
+            transactions:RunRollbackCallbacks(callbacks)
+        end
+        return committedKeys
+    end
+
+    if Settings and type(Settings[method]) == "function" then
+        for i = 1, #keys do
+            local key = keys[i]
+            if type(key) == "string" and key ~= "" then
+                Settings[method](Settings, key)
+            end
         end
     end
+
+    if method == "Commit"
+        and transactions
+        and type(transactions.CommitKeys) == "function" then
+        transactions:CommitKeys(keys)
+    end
+    return nil
 end
 
 local function CallFallback(object, method, key)
@@ -184,8 +236,8 @@ function Apply:Request(keys)
     if type(keys) == "string" then
         MarkDirty(keys)
     elseif type(keys) == "table" then
-        for _, k in ipairs(keys) do
-            MarkDirty(k)
+        for _, key in ipairs(keys) do
+            MarkDirty(key)
         end
     else
         return
@@ -198,8 +250,8 @@ function Apply:RequestAll()
     if (Perf and Perf.IsEnabled and Perf:IsEnabled()) == true then
         Perf:Inc("ApplyRequest")
     end
-    for _, k in ipairs(GetApplyOrder()) do
-        self._dirty[k] = true
+    for _, key in ipairs(GetApplyOrder()) do
+        self._dirty[key] = true
     end
     self:Schedule()
 end
@@ -217,7 +269,6 @@ function Apply:Schedule()
         return
     end
 
-    -- Fallback: immediate flush.
     Run()
 end
 
@@ -230,19 +281,25 @@ function Apply:Flush()
 
     -- Snapshot + clear first (re-entrant safe).
     local snapshot = {}
-    for k, v in pairs(dirty) do
-        if v == true then snapshot[k] = true end
-        dirty[k] = nil
+    for key, value in pairs(dirty) do
+        if value == true then snapshot[key] = true end
+        dirty[key] = nil
     end
 
+    local batchKeys = BuildOrderedKeys(snapshot)
     local app = ns.App
 
-    -- Avoid calling potentially protected/taint-prone apply paths while in combat.
-    -- Modules should still defend themselves, but the queue adds a second layer.
+    -- Defer the protected subset but retain the original batch key set. If any
+    -- executable key fails, pending changes for the complete logical batch roll
+    -- back, including keys that were waiting for combat to end.
     local inCombat = (InCombatLockdown and InCombatLockdown()) == true
     if inCombat then
-        for _, key in ipairs(GetApplyOrder()) do
-            if snapshot[key] and app and app.ShouldDeferApplyInCombat and app:ShouldDeferApplyInCombat(key) then
+        for i = 1, #batchKeys do
+            local key = batchKeys[i]
+            if snapshot[key]
+                and app
+                and app.ShouldDeferApplyInCombat
+                and app:ShouldDeferApplyInCombat(key) then
                 dirty[key] = true
                 snapshot[key] = nil
                 self._needsCombatEnd = true
@@ -250,9 +307,9 @@ function Apply:Flush()
         end
     end
 
-    -- One flush snapshot is treated as a single transactional batch.
     local orderedKeys = {}
-    for _, key in ipairs(GetApplyOrder()) do
+    for i = 1, #batchKeys do
+        local key = batchKeys[i]
         if snapshot[key] then
             orderedKeys[#orderedKeys + 1] = key
         end
@@ -282,14 +339,15 @@ function Apply:Flush()
         return
     end
 
-    FinalizePending(orderedKeys, "Rollback")
+    local previouslyCommittedKeys = FinalizePending(batchKeys, "Rollback")
 
-    local restoreKeys = {}
-    for i = 1, #appliedKeys do
-        restoreKeys[#restoreKeys + 1] = appliedKeys[i]
+    local restoreSet = {}
+    for i = 1, #appliedKeys do restoreSet[appliedKeys[i]] = true end
+    restoreSet[failedKey] = true
+    for i = 1, #(previouslyCommittedKeys or {}) do
+        restoreSet[previouslyCommittedKeys[i]] = true
     end
-    restoreKeys[#restoreKeys + 1] = failedKey
-    RestoreRuntimeKeys(restoreKeys)
+    RestoreRuntimeKeys(BuildOrderedKeys(restoreSet))
 
     if Log and Log.Error then
         Log:Error("Apply batch failed [" .. tostring(failedKey) .. "]: " .. tostring(failedErr))
@@ -301,12 +359,10 @@ function Apply:OnCombatEnd()
     if self._needsCombatEnd ~= true then return end
     self._needsCombatEnd = false
 
-    -- If anything was re-dirtied during combat, flush once now.
     if self._scheduled then return end
     self:Schedule()
 end
 
--- Back-compat: many places call ns.ApplyAll().
 function ns.ApplyAll()
     if ns.Apply and ns.Apply.RequestAll then
         ns.Apply:RequestAll()

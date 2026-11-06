@@ -6,7 +6,7 @@ Minimalist Retail UI addon with oUF unit frames, secure action bars, center reso
 
 - World of Warcraft Retail `12.1.5`
 - Interface `120105`
-- FeelsGoodUI `0.0.45`
+- FeelsGoodUI `0.0.46`
 - External required dependency: `oUF`
 - Saved variables: `FeelsGoodUIDB`
 
@@ -14,7 +14,7 @@ Copy the `FeelsGoodUI` directory into `World of Warcraft/_retail_/Interface/AddO
 
 ## Runtime policy
 
-Restricted/Secret Values are gated before Lua inspection. Unit Frames and Center Bars own those gates directly in their render paths: each producer is queried once, ordinary data stays on the normal path, and inaccessible health, power, classification, aura-source, and rune values go only to documented native presentation sinks or an explicit unavailable state. Protected action-bar and Blizzard-frame mutations remain deferred outside combat. Detach invalidates queued action-bar work, disables permanent hook side effects, and performs a narrow post-combat Blizzard-shell restore when teardown occurs during combat. Shared debounce requests treat an existing keyed timer as a successful coalesced request; cancellation always invalidates its generation before lifecycle teardown. Apply handlers propagate explicit failure: settings commit only after every key in the batch succeeds, while a `false` result or exception rolls back the batch and restores already-applied runtime owners.
+Restricted/Secret Values are gated before Lua inspection. Unit Frames and Center Bars own those gates directly in their render paths: each producer is queried once, ordinary data stays on the normal path, and inaccessible health, power, classification, aura-source, and rune values go only to documented native presentation sinks or an explicit unavailable state. Protected action-bar and Blizzard-frame mutations remain deferred outside combat. Detach invalidates queued action-bar work, disables permanent hook side effects, and performs a narrow post-combat Blizzard-shell restore when teardown occurs during combat. Shared debounce requests treat an existing keyed timer as a successful coalesced request; cancellation always invalidates its generation before lifecycle teardown. Apply handlers propagate explicit failure: settings commit only after every key in the batch succeeds, while a `false` result or exception rolls back the batch and restores already-applied runtime owners. Panel undo/reset operations participate in the same transaction: history is consumed or invalidated only after every required apply key commits, and failed or partially deferred batches restore both profile sections and the exact undo stack.
 
 ## Validation
 
