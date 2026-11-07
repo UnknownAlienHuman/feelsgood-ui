@@ -240,31 +240,16 @@ local function CaptureButtonState(button, components)
     return state
 end
 
-local function RestoreLayout(original, managed)
+local function ForceRestoreLayout(original)
     local object = original and original.object
-    if not (object and managed and managed.object == object) then return end
+    if not object then return false end
 
-    local parentKnown, parent = ReadParent(object)
-    if parentKnown and parent == managed.parent and type(object.SetParent) == "function" then
-        object:SetParent(original.parent)
-    end
-
-    local currentPoints = ReadPoints(object)
-    if currentPoints and PointsEqual(currentPoints, managed.points) then
-        RestorePoints(object, original.points)
-    end
-
-    local currentSize = ReadSize(object)
-    if currentSize and NumberEqual(currentSize.width, managed.size.width)
-        and NumberEqual(currentSize.height, managed.size.height)
-        and type(object.SetSize) == "function" then
+    if type(object.SetParent) == "function" then object:SetParent(original.parent) end
+    RestorePoints(object, original.points)
+    if type(object.SetSize) == "function" then
         object:SetSize(original.size.width, original.size.height)
     end
-
-    local currentHitRect = ReadHitRect(object)
-    if original.hitRect and managed.hitRect and currentHitRect
-        and HitRectEqual(currentHitRect, managed.hitRect)
-        and type(object.SetHitRectInsets) == "function" then
+    if original.hitRect and type(object.SetHitRectInsets) == "function" then
         object:SetHitRectInsets(
             original.hitRect.left,
             original.hitRect.right,
@@ -272,11 +257,32 @@ local function RestoreLayout(original, managed)
             original.hitRect.bottom
         )
     end
+    SetShown(object, original.shown)
+    return true
+end
 
+local function RestoreLayout(original, managed)
+    local object = original and original.object
+    if not (object and managed and managed.object == object) then return end
+
+    local parentKnown, parent = ReadParent(object)
+    local currentPoints = ReadPoints(object)
+    local currentSize = ReadSize(object)
     local currentShown = ReadShown(object)
-    if currentShown == managed.shown then
-        SetShown(object, original.shown)
+    local currentHitRect = ReadHitRect(object)
+
+    local owned = parentKnown
+        and parent == managed.parent
+        and currentPoints and PointsEqual(currentPoints, managed.points)
+        and currentSize
+        and NumberEqual(currentSize.width, managed.size.width)
+        and NumberEqual(currentSize.height, managed.size.height)
+        and currentShown == managed.shown
+
+    if owned and managed.hitRect then
+        owned = currentHitRect and HitRectEqual(currentHitRect, managed.hitRect)
     end
+    if owned then ForceRestoreLayout(original) end
 end
 
 local function RestoreRegion(original, managed)
@@ -320,8 +326,47 @@ local function RestoreTextRegion(original, managed)
     end
 end
 
+local function ForceRestoreRegion(original)
+    local object = original and original.object
+    if not object then return end
+    if original.points then RestorePoints(object, original.points) end
+    if original.texCoord then RestoreTexCoord(object, original.texCoord) end
+    if type(original.alpha) == "number" then SetAlpha(object, original.alpha) end
+    if type(original.shown) == "boolean" then SetShown(object, original.shown) end
+end
+
+local function ForceRestoreTextRegion(original)
+    ForceRestoreRegion(original)
+    local object = original and original.object
+    if object and original.textKnown and type(object.SetText) == "function" then
+        object:SetText(original.text)
+    end
+end
+
+local function ForceRestoreButtonRecord(record)
+    if type(record) ~= "table" or not record.original then return false end
+    local original = record.original
+    ForceRestoreLayout(original.layout)
+    ForceRestoreRegion(original.icon)
+    ForceRestoreRegion(original.highlight)
+    ForceRestoreRegion(original.cooldown)
+    ForceRestoreRegion(original.iconMask)
+    ForceRestoreTextRegion(original.name)
+    ForceRestoreTextRegion(original.hotkey)
+    for _, alpha in pairs(original.alphas or {}) do
+        if alpha.object and type(alpha.alpha) == "number" then
+            SetAlpha(alpha.object, alpha.alpha)
+        end
+    end
+    if type(record.release) == "function" then
+        pcall(record.release, record.button)
+    end
+    return true
+end
+
 local function RestoreButtonRecord(record)
-    if type(record) ~= "table" or not record.original or not record.managed then return false end
+    if type(record) ~= "table" or not record.original then return false end
+    if not record.managed then return ForceRestoreButtonRecord(record) end
 
     RestoreLayout(record.original.layout, record.managed.layout)
     RestoreRegion(record.original.icon, record.managed.icon)
@@ -339,6 +384,9 @@ local function RestoreButtonRecord(record)
             and NumberEqual(ReadAlpha(object), managed.alpha) then
             SetAlpha(object, original.alpha)
         end
+    end
+    if type(record.release) == "function" then
+        pcall(record.release, record.button)
     end
     return true
 end
@@ -371,6 +419,7 @@ function State:BeginButton(module, index, button, components)
         record = {
             button = button,
             original = original,
+            release = components and components.release or nil,
         }
         registry[index] = record
     end
@@ -439,7 +488,12 @@ function State:SuppressNativeBar(module, frame)
 
     SetAlpha(frame, 0)
     record.managedAlpha = ReadAlpha(frame)
-    return type(record.managedAlpha) == "number"
+    if type(record.managedAlpha) ~= "number" or not NumberEqual(record.managedAlpha, 0) then
+        SetAlpha(frame, record.alpha)
+        module._petNativeBarState = nil
+        return false, "Native pet-bar alpha could not be verified"
+    end
+    return true
 end
 
 function State:RestoreAll(module)
