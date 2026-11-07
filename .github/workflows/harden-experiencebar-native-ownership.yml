@@ -6,6 +6,7 @@ on:
       - codex/experiencebar-native-ownership
     paths:
       - '.github/workflows/harden-experiencebar-native-ownership.yml'
+      - '.codex/run_harden_experiencebar_native_ownership.py'
 
 permissions:
   contents: write
@@ -25,7 +26,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python .codex/harden_experiencebar_native_ownership.py
+          python .codex/run_harden_experiencebar_native_ownership.py
           git diff --check
 
       - name: Audit lifecycle and frame ownership
@@ -45,6 +46,7 @@ jobs:
           assert 'pcall(manager.Show' not in source
           assert 'function XP:Enable(' not in source
           assert 'function XP:Disable(' not in source
+          assert 'if not ok or type(value) ~= "boolean" then return nil end' in source
 
           init_body = source.split('function XP:Init()', 1)[1].split('\nend\n\nreturn XP', 1)[0]
           assert 'ApplyConfig' not in init_body, 'Init must not perform lifecycle apply'
@@ -80,5 +82,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "Make ExperienceBar native takeover reversible" -m "Suppress Blizzard status tracking through captured alpha/mouse ownership without hiding foreign frames, restore only still-owned values, remove duplicate lifecycle enable/disable paths and first-attach double apply, and return explicit lifecycle results. Release FeelsGoodUI 0.0.55."
+          git commit -m "Make ExperienceBar native takeover reversible" -m "Suppress Blizzard status tracking through captured alpha/mouse ownership without hiding foreign frames, preserve false mouse states correctly, restore only still-owned values, remove duplicate lifecycle enable/disable paths and first-attach double apply, and return explicit lifecycle results. Release FeelsGoodUI 0.0.55."
           git push origin HEAD:codex/experiencebar-native-ownership
