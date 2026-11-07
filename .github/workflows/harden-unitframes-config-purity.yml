@@ -1,0 +1,81 @@
+name: Harden UnitFrames config purity
+
+on:
+  push:
+    branches:
+      - codex/unitframes-config-purity
+    paths:
+      - '.github/workflows/harden-unitframes-config-purity.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Apply config-purity transform
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .codex/harden_unitframes_config_purity.py
+          git diff --check
+
+      - name: Audit runtime ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          policy = Path('modules/UnitFramesPolicy.lua').read_text()
+          runtime = Path('modules/UnitFramesRuntime.lua').read_text()
+          render = Path('modules/UnitFramesRender.lua').read_text()
+          facade = Path('modules/UnitFrames.lua').read_text()
+          check = Path('check_lua.js').read_text()
+
+          assert 'profile[section] =' not in policy
+          assert 'function Policy.NormalizeUF' not in policy
+          assert 'NormalizeUF' not in runtime
+          assert 'NormalizeUF' not in render
+          assert 'NormalizeUF' not in facade
+          assert 'local EMPTY = {}' in policy
+          assert 'runtime UnitFrames profile normalization call' in check
+          print('UnitFrames runtime ownership audit passed.')
+          PY
+
+      - name: Run Lua purity harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v lua5.1 >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y lua5.1
+          fi
+          lua5.1 .codex/test_unitframes_config_purity.lua
+
+      - name: Validate addon
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm test
+
+      - name: Commit validated result
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .codex
+          rm -f .github/workflows/harden-unitframes-config-purity.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Make UnitFrames runtime configuration read-only" -m "Stop policy getters and frame creation/apply paths from repairing SavedVariables, remove runtime size/scale normalizers, use immutable local fallbacks, and leave persisted repair to DB, Settings, and Schema. Release FeelsGoodUI 0.0.52."
+          git push origin HEAD:codex/unitframes-config-purity
