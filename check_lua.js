@@ -83,6 +83,29 @@ function assertBefore(entries, first, second) {
     }
 }
 
+
+function readSource(name) {
+    const file = path.join(ROOT, name);
+    if (!fs.existsSync(file)) {
+        errors.push(`${name}: missing`);
+        return '';
+    }
+    return fs.readFileSync(file, 'utf8');
+}
+
+function assertSourceIncludes(name, text) {
+    if (!readSource(name).includes(text)) {
+        errors.push(`${name}: expected source contract '${text}'`);
+    }
+}
+
+function assertSourceExcludes(name, pattern, label) {
+    const source = readSource(name);
+    if (pattern.test(source)) {
+        errors.push(`${name}: forbidden ${label || pattern}`);
+    }
+}
+
 try {
     const luaFiles = [];
     walk(ROOT, luaFiles);
@@ -108,12 +131,41 @@ try {
     assertBefore(tocEntries, 'core/FeatureRegistry.lua', 'core/RuntimeSettings.lua');
     assertBefore(tocEntries, 'core/RuntimeSettings.lua', 'core/Commands.lua');
     assertBefore(tocEntries, 'core/Apply.lua', 'core/PanelTransactions.lua');
+    assertBefore(tocEntries, 'core/RuntimeSettings.lua', 'core/MoversTransactions.lua');
+    assertBefore(tocEntries, 'core/MoversTransactions.lua', 'core/MoversShared.lua');
     assertBefore(tocEntries, 'core/OptionsSharedHelpers.lua', 'core/PanelTransactions.lua');
     assertBefore(tocEntries, 'core/PanelTransactions.lua', 'core/OptionsFieldBuilders.lua');
     assertBefore(tocEntries, 'modules/UnitFramesTarget.lua', 'modules/UnitFramesRender.lua');
     assertBefore(tocEntries, 'modules/UnitFramesRender.lua', 'modules/UnitFramesPolicy.lua');
     assertBefore(tocEntries, 'modules/CenterBarsRuntime.lua', 'modules/CenterBarsRender.lua');
     assertBefore(tocEntries, 'modules/CenterBarsRender.lua', 'modules/CenterBars.lua');
+
+    assertSourceIncludes('core/FeatureRegistry.lua', 'movers = {');
+    assertSourceIncludes('core/PanelTransactions.lua', 'function Tx:RollbackAfter(checkpoint, keys)');
+    assertSourceIncludes('core/MoversTransactions.lua', 'function Transactions:CommitWrites');
+    assertSourceIncludes('core/MoversTransactions.lua', 'CaptureWriteSnapshots');
+
+    for (const name of [
+        'modules/ActionBarsEditMode.lua',
+        'modules/CenterBars.lua',
+        'modules/UnitFramesPolicy.lua',
+        'modules/CompanionPetBar.lua',
+        'modules/ExperienceBar.lua',
+    ]) {
+        assertSourceExcludes(name, /\bsetScale\s*=\s*function/, 'direct mover setScale writer');
+        assertSourceExcludes(name, /\bsetSize\s*=\s*function/, 'direct mover setSize writer');
+        assertSourceExcludes(name, /\bonWheel\s*=\s*function/, 'direct mover onWheel writer');
+    }
+
+    for (const name of [
+        'core/Movers.lua',
+        'core/MoversShared.lua',
+        'core/MoversEditor.lua',
+        'core/MoversInspector.lua',
+    ]) {
+        assertSourceExcludes(name, /positions\s*\[[^\]]+\]\s*=/, 'direct persisted position write');
+        assertSourceExcludes(name, /movers\.unlocked\s*=(?!=)/, 'direct persisted lock-state write');
+    }
 
     if (errors.length > 0) {
         for (const error of errors) console.error(error);

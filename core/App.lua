@@ -105,6 +105,7 @@ App._applyOrder = App._applyOrder or {
     "actionbars",
     "companion",
     "minimap",
+    "movers",
 }
 
 function App:BuildFeatureSpecs()

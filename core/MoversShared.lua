@@ -5,9 +5,12 @@ local _, ns = ...
 local DB = ns.DB
 local Log = ns.Log
 local Apply = ns.Apply
+local Transactions = ns.MoversTransactions
 
 local Shared = ns.MoversShared or {}
 ns.MoversShared = Shared
+
+local RequestApplyForKeys
 
 local VALID_POINTS = {
     TOPLEFT = true, TOP = true, TOPRIGHT = true,
@@ -23,16 +26,6 @@ local function GetProfileSection(section)
         end
     end
     return {}
-end
-
-local function EnsureProfileSection(section)
-    if DB and DB.EnsureSection then
-        local value = DB:EnsureSection(section)
-        if type(value) == "table" then
-            return value
-        end
-    end
-    return GetProfileSection(section)
 end
 
 local function IsSafeToEdit()
@@ -238,27 +231,68 @@ local function GetStoredPoint(key, spec, frame)
     return NormalizePointTable(point)
 end
 
-local function SetStoredPoint(key, spec, point, frame)
+local function SamePoint(a, b)
+    return type(a) == "table"
+        and type(b) == "table"
+        and a.point == b.point
+        and a.relPoint == b.relPoint
+        and tonumber(a.x) == tonumber(b.x)
+        and tonumber(a.y) == tonumber(b.y)
+end
+
+local function BuildStoredPointWrites(key, spec, point, frame)
     local normalized = NormalizePointTable(point)
-
-    if type(spec) == "table" and type(spec.setStoredPoint) == "function" then
-        local ok, handled = pcall(spec.setStoredPoint, spec, key, frame, normalized)
-        if ok and handled == true then
-            return normalized
-        end
-        if ok and type(handled) == "table" then
-            normalized = NormalizePointTable(handled, normalized)
-        end
-    end
-
     local positionKey = GetMoverPositionKey(key, spec)
     if not positionKey then
-        return normalized
+        return normalized, nil, nil, nil, "Mover position key unavailable"
     end
 
-    local positions = EnsureProfileSection("positions")
-    positions[positionKey] = normalized
-    return normalized
+    local writes
+    if type(spec) == "table" and type(spec.buildPositionWrites) == "function" then
+        local ok, built = pcall(spec.buildPositionWrites, normalized, spec, key, frame)
+        if not ok then
+            return normalized, nil, nil, nil, tostring(built)
+        end
+        writes = built
+    else
+        local current = GetStoredPoint(key, spec, frame)
+        if SamePoint(current, normalized) then
+            return normalized, {}, nil, (type(spec) == "table" and spec.panelKey) or "editmode"
+        end
+        writes = {
+            path = { "positions", positionKey },
+            value = normalized,
+        }
+    end
+
+    return normalized,
+        writes,
+        (type(spec) == "table" and spec.positionApplyKeys) or "movers",
+        (type(spec) == "table" and spec.panelKey) or "editmode"
+end
+
+local function SetStoredPoint(key, spec, point, frame)
+    local normalized, writes, applyKeys, panelKey, buildError = BuildStoredPointWrites(key, spec, point, frame)
+    if not writes then
+        if RequestApplyForKeys then RequestApplyForKeys(applyKeys or "movers", key) end
+        if Log and Log.Warn then Log:Warn("Mover position builder failed: " .. tostring(buildError)) end
+        return normalized, false
+    end
+    if type(writes) == "table" and type(writes.path) ~= "table" and #writes == 0 then
+        return normalized, false
+    end
+
+    if not (Transactions and type(Transactions.CommitWrites) == "function") then
+        if RequestApplyForKeys then RequestApplyForKeys(applyKeys, key) end
+        if Log and Log.Warn then Log:Warn("Mover position transaction owner unavailable.") end
+        return normalized, false
+    end
+
+    local changed, detail = Transactions:CommitWrites(applyKeys, writes, panelKey)
+    if changed == false and detail and Log and Log.Warn then
+        Log:Warn("Mover position commit failed: " .. tostring(detail))
+    end
+    return normalized, changed == true
 end
 
 local function GetFrameCenterOffsets(frame)
@@ -337,7 +371,6 @@ local function SetEditablePosition(key, frame, x, y, spec)
     if type(spec) == "table" and type(spec.setEditPosition) == "function" then
         local ok, handled = pcall(spec.setEditPosition, spec, key, frame, normalized.x, normalized.y, normalized)
         if ok and handled == true then
-            SetStoredPoint(key, spec, normalized, frame)
             return normalized
         end
         if ok and type(handled) == "table" then
@@ -349,7 +382,7 @@ local function SetEditablePosition(key, frame, x, y, spec)
         ApplyPoint(frame, normalized, spec, key)
     end
 
-    return SetStoredPoint(key, spec, normalized, frame)
+    return normalized
 end
 
 local function EnsureCenterAnchor(key, frame, spec)
@@ -358,36 +391,32 @@ local function EnsureCenterAnchor(key, frame, spec)
     SetEditablePosition(key, frame, x, y, spec)
 end
 
-local function SavePoint(key, frame, spec)
-    if not key or not frame then return end
+local function ResolveStoredPointFromFrame(key, frame, spec)
+    if not key or not frame then return nil end
 
     local point, relFrame, relPoint, x, y = frame:GetPoint(1)
     if relFrame and relFrame ~= UIParent then
         local cx, cy = GetEditablePosition(key, frame, spec)
-        return SetStoredPoint(key, spec, {
-            point = "CENTER",
-            relPoint = "CENTER",
-            x = cx,
-            y = cy,
-        }, frame)
+        return NormalizePointTable({ point = "CENTER", relPoint = "CENTER", x = cx, y = cy })
     end
 
     if type(point) ~= "string" or type(relPoint) ~= "string" then
         local cx, cy = GetEditablePosition(key, frame, spec)
-        return SetStoredPoint(key, spec, {
-            point = "CENTER",
-            relPoint = "CENTER",
-            x = cx,
-            y = cy,
-        }, frame)
+        return NormalizePointTable({ point = "CENTER", relPoint = "CENTER", x = cx, y = cy })
     end
 
-    return SetStoredPoint(key, spec, {
+    return NormalizePointTable({
         point = point,
         relPoint = relPoint,
         x = (type(x) == "number") and x or 0,
         y = (type(y) == "number") and y or 0,
-    }, frame)
+    })
+end
+
+local function SavePoint(key, frame, spec)
+    local point = ResolveStoredPointFromFrame(key, frame, spec)
+    if not point then return nil, false end
+    return SetStoredPoint(key, spec, point, frame)
 end
 
 local function GridStep()
@@ -447,7 +476,7 @@ local function NormalizeApplyKeys(keys)
     return out
 end
 
-local function RequestApplyForKeys(keys, scope)
+RequestApplyForKeys = function(keys, scope)
     local resolved = NormalizeApplyKeys(keys)
     if #resolved == 0 then
         if Log and Log.Warn then
@@ -471,7 +500,6 @@ local function RequestApplyForKeys(keys, scope)
 end
 
 Shared.GetProfileSection = GetProfileSection
-Shared.EnsureProfileSection = EnsureProfileSection
 Shared.IsSafeToEdit = IsSafeToEdit
 Shared.UIParentRect = UIParentRect
 Shared.UIWH = UIWH
@@ -485,6 +513,8 @@ Shared.ApplyPoint = ApplyPoint
 Shared.ApplyStoredPoint = ApplyStoredPoint
 Shared.GetStoredPoint = GetStoredPoint
 Shared.SetStoredPoint = SetStoredPoint
+Shared.BuildStoredPointWrites = BuildStoredPointWrites
+Shared.ResolveStoredPointFromFrame = ResolveStoredPointFromFrame
 Shared.GetEditablePosition = GetEditablePosition
 Shared.SetEditablePosition = SetEditablePosition
 Shared.EnsureCenterAnchor = EnsureCenterAnchor

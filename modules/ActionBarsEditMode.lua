@@ -39,6 +39,22 @@ local function ClampActionSpacing(value)
     return spacing
 end
 
+local function ResolveRequestedSize(width, height)
+    local rw = tonumber(width) or 32
+    local rh = tonumber(height)
+    if type(rh) ~= "number" then rh = rw end
+    return ClampActionButtonSize((rw + rh) * 0.5)
+end
+
+local function PreviewLayout(size, spacing)
+    local runtime = ns.ActionBarsRuntime
+    local module = ns.ActionBars
+    if not (runtime and type(runtime.PreviewMoverLayout) == "function" and module) then
+        return false, "ActionBars preview owner unavailable"
+    end
+    return runtime.PreviewMoverLayout(module, size, spacing)
+end
+
 local function CreateActionBarMoverSpec(id)
     return {
         label = "ActionBar " .. tostring(id),
@@ -49,23 +65,48 @@ local function CreateActionBarMoverSpec(id)
             local size = ClampActionButtonSize(ab.buttonSize)
             return size, size
         end,
-        setSize = function(width, height)
-            local rw = tonumber(width) or 32
-            local rh = tonumber(height)
-            if type(rh) ~= "number" then
-                rh = rw
-            end
-
-            local ab = GetActionBarsCfg()
-            ab.buttonSize = ClampActionButtonSize((rw + rh) * 0.5)
+        buildSizeWrites = function(width, height)
+            local size = ResolveRequestedSize(width, height)
+            return {
+                path = { "actionbars", "buttonSize" },
+                value = size,
+                rule = { type = "int", min = 24, max = 60, fallback = 32 },
+            }
         end,
-        onWheel = function(delta, shiftDown)
+        previewSize = function(_, width, height)
+            local ab = GetActionBarsCfg()
+            local size = ResolveRequestedSize(width, height)
+            local ok, detail = PreviewLayout(size, ClampActionSpacing(ab.spacing))
+            if ok == false then return false, detail end
+            return size, size
+        end,
+        buildWheelWrites = function(delta, shiftDown)
             local ab = GetActionBarsCfg()
             if shiftDown then
-                ab.spacing = ClampActionSpacing((tonumber(ab.spacing) or 0) + delta)
-            else
-                ab.buttonSize = ClampActionButtonSize((tonumber(ab.buttonSize) or 32) + delta)
+                return {
+                    path = { "actionbars", "spacing" },
+                    value = ClampActionSpacing((tonumber(ab.spacing) or 0) + delta),
+                    rule = { type = "int", min = 0, max = 12, fallback = 0 },
+                }
             end
+
+            return {
+                path = { "actionbars", "buttonSize" },
+                value = ClampActionButtonSize((tonumber(ab.buttonSize) or 32) + delta),
+                rule = { type = "int", min = 24, max = 60, fallback = 32 },
+            }
+        end,
+        previewWheel = function(_, delta, shiftDown)
+            local ab = GetActionBarsCfg()
+            local size = ClampActionButtonSize(ab.buttonSize)
+            local spacing = ClampActionSpacing(ab.spacing)
+            if shiftDown then
+                spacing = ClampActionSpacing(spacing + delta)
+            else
+                size = ClampActionButtonSize(size + delta)
+            end
+            local ok, detail = PreviewLayout(size, spacing)
+            if ok == false then return false, detail end
             return true
         end,
     }

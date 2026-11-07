@@ -47,12 +47,6 @@ local function GetCfg()
     return cfg, p
 end
 
-local function GetSection()
-    local profile = (DB and DB.GetProfile) and DB:GetProfile() or {}
-    profile.experience = (type(profile.experience) == "table") and profile.experience or {}
-    return profile.experience
-end
-
 local function CreateMoverSpec()
     return {
         label = "XP Bar",
@@ -62,18 +56,40 @@ local function CreateMoverSpec()
             local cfg = GetCfg()
             return cfg.width, cfg.height
         end,
-        setSize = function(width, height)
-            local xp = GetSection()
-            xp.width = ClampWhole(width, 200, 900, 420)
-            xp.height = ClampWhole(height, 6, 24, 10)
+        buildSizeWrites = function(width, height)
+            return {
+                { path = { "experience", "width" }, value = ClampWhole(width, 200, 900, 420), rule = { type = "int", min = 200, max = 900, fallback = 420 } },
+                { path = { "experience", "height" }, value = ClampWhole(height, 6, 24, 10), rule = { type = "int", min = 6, max = 24, fallback = 10 } },
+            }
         end,
-        onWheel = function(delta, shiftDown)
-            local xp = GetSection()
+        previewSize = function(frame, width, height)
+            local resolvedWidth = ClampWhole(width, 200, 900, 420)
+            local resolvedHeight = ClampWhole(height, 6, 24, 10)
+            if frame and frame.SetSize then frame:SetSize(resolvedWidth, resolvedHeight) end
+            return resolvedWidth, resolvedHeight
+        end,
+        buildWheelWrites = function(delta, shiftDown)
+            local cfg = GetCfg()
             if shiftDown then
-                xp.height = ClampWhole((tonumber(xp.height) or 10) + delta, 6, 24, 10)
-            else
-                xp.width = ClampWhole((tonumber(xp.width) or 420) + ((tonumber(delta) or 0) * 10), 200, 900, 420)
+                return {
+                    path = { "experience", "height" },
+                    value = ClampWhole(cfg.height + delta, 6, 24, 10),
+                    rule = { type = "int", min = 6, max = 24, fallback = 10 },
+                }
             end
+
+            return {
+                path = { "experience", "width" },
+                value = ClampWhole(cfg.width + ((tonumber(delta) or 0) * 10), 200, 900, 420),
+                rule = { type = "int", min = 200, max = 900, fallback = 420 },
+            }
+        end,
+        previewWheel = function(frame, delta, shiftDown)
+            local cfg = GetCfg()
+            local width, height = cfg.width, cfg.height
+            if shiftDown then height = ClampWhole(height + delta, 6, 24, 10)
+            else width = ClampWhole(width + ((tonumber(delta) or 0) * 10), 200, 900, 420) end
+            if frame and frame.SetSize then frame:SetSize(width, height) end
             return true
         end,
     }

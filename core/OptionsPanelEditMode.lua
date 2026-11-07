@@ -34,7 +34,8 @@ local function BuildPanel_EditMode()
 
     local PANEL_KEY = "editmode"
     local panelContract = (type(GetPanelContract) == "function") and GetPanelContract(PANEL_KEY) or nil
-    local APPLY_KEYS = (panelContract and panelContract.applyKeys) or "runtime"
+    local APPLY_KEYS = (panelContract and panelContract.applyKeys) or "movers"
+    local UNDO_APPLY_KEYS = (panelContract and panelContract.restoreApplyKeys) or APPLY_KEYS
     local RESET_SECTIONS = (panelContract and panelContract.resetSections) or { "movers", "editor" }
 
     local Refresh
@@ -153,27 +154,11 @@ local function BuildPanel_EditMode()
         end
     end)
 
-    local function SyncMoversFromProfile()
-        if Movers and Movers.SyncFromProfile then
-            Movers:SyncFromProfile()
-            return
-        end
-
-        local movers = GetProfileSection("movers")
-        if Movers and Movers.SetUnlocked then
-            Movers:SetUnlocked(movers.unlocked == true)
-        end
-        if Movers and Movers.RefreshEditorSettings then
-            Movers:RefreshEditorSettings()
-        end
-    end
-
     local function RefreshAfterTransaction()
-        SyncMoversFromProfile()
         Refresh()
     end
 
-    local function RequestRuntimeApply()
+    local function RequestPanelApply()
         if Apply and type(Apply.Request) == "function" then
             Apply:Request(APPLY_KEYS)
         end
@@ -181,14 +166,19 @@ local function BuildPanel_EditMode()
 
     undoBtn:SetScript("OnClick", function()
         if PanelTransactions and type(PanelTransactions.UndoPanel) == "function" then
-            if PanelTransactions:UndoPanel(PANEL_KEY, APPLY_KEYS, { onRollback = RefreshAfterTransaction }) then
-                RequestRuntimeApply()
+            if PanelTransactions:UndoPanel(PANEL_KEY, UNDO_APPLY_KEYS, { onRollback = RefreshAfterTransaction }) then
+                if Apply and type(Apply.Request) == "function" then
+                    Apply:Request(UNDO_APPLY_KEYS)
+                end
                 RefreshAfterTransaction()
             end
             return
         end
 
         if Settings and Settings.UndoPanel and Settings:UndoPanel(PANEL_KEY) then
+            if Apply and type(Apply.Request) == "function" then
+                Apply:Request(UNDO_APPLY_KEYS)
+            end
             RefreshAfterTransaction()
         end
     end)
@@ -196,7 +186,7 @@ local function BuildPanel_EditMode()
     resetSectionBtn:SetScript("OnClick", function()
         if PanelTransactions and type(PanelTransactions.ResetSections) == "function" then
             if PanelTransactions:ResetSections(PANEL_KEY, RESET_SECTIONS, APPLY_KEYS, { onRollback = RefreshAfterTransaction }) then
-                RequestRuntimeApply()
+                RequestPanelApply()
                 RefreshAfterTransaction()
             end
             return
@@ -216,15 +206,6 @@ local function BuildPanel_EditMode()
         end
     end
 
-    local function RefreshUnlockedState()
-        if Movers and Movers.SetUnlocked then
-            local movers = GetProfileSection("movers")
-            if movers.unlocked then
-                Movers:SetUnlocked(true)
-            end
-        end
-    end
-
     local function IsRefreshing()
         return bindingState:IsRefreshing()
     end
@@ -238,9 +219,10 @@ local function BuildPanel_EditMode()
             contextPath = { "unlocked" },
             read = ReadBoolWithFallback(false),
             rule = { type = "boolean", fallback = false },
+            applyKeys = APPLY_KEYS,
             afterSet = function(checked)
-                if Movers and Movers.SetUnlocked then
-                    Movers:SetUnlocked(checked)
+                if Movers and Movers.PreviewUnlocked then
+                    Movers:PreviewUnlocked(checked)
                 end
             end,
         },
@@ -254,7 +236,7 @@ local function BuildPanel_EditMode()
             transform = IntTransform(10),
             rule = { type = "int", min = 4, max = 64, fallback = 10 },
             afterSet = function()
-                RefreshUnlockedState()
+                RefreshEditorSettings()
             end,
         },
         {
@@ -342,12 +324,16 @@ local function BuildPanel_EditMode()
         },
     }, {
         isRefreshing = IsRefreshing,
-        setValue = function(path, value, rule)
+        setValue = function(path, value, rule, applyKeys)
             if bindingState:IsRefreshing() then
                 return
             end
 
-            SetProfileValue(path, value, rule, nil, PANEL_KEY)
+            local keys = applyKeys or APPLY_KEYS
+            local changed = SetProfileValue(path, value, rule, keys, PANEL_KEY)
+            if changed and Apply and type(Apply.Request) == "function" then
+                Apply:Request(keys)
+            end
         end,
     })
 

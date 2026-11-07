@@ -11,5 +11,8 @@ flowchart LR
   Registry --> CB["Center Bars"]
   Registry --> Companion["Companion"]
   Registry --> XP["Experience Bar"]
-  Settings --> UI["Options + Movers"]
+  Settings --> UI["Options + Commands"]
+  Settings --> MoverTx["MoversTransactions"]
+  MoverTx --> Movers["Mover runtime preview"]
+  MoverTx --> Registry
 ```

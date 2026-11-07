@@ -216,6 +216,34 @@ local function ClampWhole(v, minV, maxV, fallback)
     return math.floor(ClampNumber(v, minV, maxV, fallback) + 0.5)
 end
 
+local function ResolveCenterSize(width, height)
+    local resolvedWidth = ClampWhole(width, 260, 720, 420)
+    local powerHeight = ClampWhole(height, 6, 28, 12)
+    local resourceHeight = ClampWhole(powerHeight, 6, 24, 10)
+    return resolvedWidth, powerHeight, resourceHeight
+end
+
+local function PreviewCenterGeometry(width, powerHeight, resourceHeight)
+    if not Center.frame then
+        return false, "CenterBars frame unavailable"
+    end
+
+    local center = GetCenterCfg()
+    local gap = ClampWhole(center.spacing, 0, 20, 5)
+    Center.frame:SetSize(width, resourceHeight + gap + powerHeight)
+    if Center.resourceBar then
+        Center.resourceBar:SetSize(width, resourceHeight)
+    end
+    if Center.powerBar then
+        Center.powerBar:SetSize(width, powerHeight)
+        Center.powerBar:ClearAllPoints()
+        if Center.resourceBar then
+            Center.powerBar:SetPoint("TOP", Center.resourceBar, "BOTTOM", 0, -gap)
+        end
+    end
+    return true
+end
+
 local function CreateCenterMoverSpec(label)
     return {
         label = label,
@@ -225,30 +253,59 @@ local function CreateCenterMoverSpec(label)
             local center = GetCenterCfg()
             return ClampNumber(center.scale, 0.60, 1.30, 1.0)
         end,
-        setScale = function(value)
-            local center = GetCenterCfg()
-            center.scale = ClampNumber(value, 0.60, 1.30, 1.0)
+        buildScaleWrites = function(value)
+            return {
+                path = { "center", "scale" },
+                value = ClampNumber(value, 0.60, 1.30, 1.0),
+                rule = { type = "number", min = 0.60, max = 1.30, fallback = 1.0 },
+            }
         end,
         getSize = function()
             local center = GetCenterCfg()
             return ClampWhole(center.width, 260, 720, 420), ClampWhole(center.powerHeight, 6, 28, 12)
         end,
-        setSize = function(width, height)
-            local center = GetCenterCfg()
-            local clampedWidth = ClampWhole(width, 260, 720, 420)
-            local clampedHeight = ClampWhole(height, 6, 28, 12)
-            center.width = clampedWidth
-            center.powerHeight = clampedHeight
-            center.resourceHeight = ClampWhole(clampedHeight, 6, 24, 10)
+        buildSizeWrites = function(width, height)
+            local resolvedWidth, powerHeight, resourceHeight = ResolveCenterSize(width, height)
+            return {
+                { path = { "center", "width" }, value = resolvedWidth, rule = { type = "int", min = 260, max = 720, fallback = 420 } },
+                { path = { "center", "powerHeight" }, value = powerHeight, rule = { type = "int", min = 6, max = 28, fallback = 12 } },
+                { path = { "center", "resourceHeight" }, value = resourceHeight, rule = { type = "int", min = 6, max = 24, fallback = 10 } },
+            }
         end,
-        onWheel = function(delta, shiftDown)
+        previewSize = function(_, width, height)
+            local resolvedWidth, powerHeight, resourceHeight = ResolveCenterSize(width, height)
+            local ok, detail = PreviewCenterGeometry(resolvedWidth, powerHeight, resourceHeight)
+            if ok == false then return false, detail end
+            return resolvedWidth, powerHeight
+        end,
+        buildWheelWrites = function(delta, shiftDown)
             local center = GetCenterCfg()
             if shiftDown then
-                center.powerHeight = ClampWhole((tonumber(center.powerHeight) or 12) + delta, 6, 28, 12)
-                center.resourceHeight = ClampWhole((tonumber(center.resourceHeight) or 10) + delta, 6, 24, 10)
-            else
-                center.width = ClampWhole((tonumber(center.width) or 420) + ((tonumber(delta) or 0) * 10), 260, 720, 420)
+                return {
+                    { path = { "center", "powerHeight" }, value = ClampWhole((tonumber(center.powerHeight) or 12) + delta, 6, 28, 12), rule = { type = "int", min = 6, max = 28, fallback = 12 } },
+                    { path = { "center", "resourceHeight" }, value = ClampWhole((tonumber(center.resourceHeight) or 10) + delta, 6, 24, 10), rule = { type = "int", min = 6, max = 24, fallback = 10 } },
+                }
             end
+
+            return {
+                path = { "center", "width" },
+                value = ClampWhole((tonumber(center.width) or 420) + ((tonumber(delta) or 0) * 10), 260, 720, 420),
+                rule = { type = "int", min = 260, max = 720, fallback = 420 },
+            }
+        end,
+        previewWheel = function(_, delta, shiftDown)
+            local center = GetCenterCfg()
+            local width = ClampWhole(center.width, 260, 720, 420)
+            local powerHeight = ClampWhole(center.powerHeight, 6, 28, 12)
+            local resourceHeight = ClampWhole(center.resourceHeight, 6, 24, 10)
+            if shiftDown then
+                powerHeight = ClampWhole(powerHeight + delta, 6, 28, 12)
+                resourceHeight = ClampWhole(resourceHeight + delta, 6, 24, 10)
+            else
+                width = ClampWhole(width + ((tonumber(delta) or 0) * 10), 260, 720, 420)
+            end
+            local ok, detail = PreviewCenterGeometry(width, powerHeight, resourceHeight)
+            if ok == false then return false, detail end
             return true
         end,
     }
