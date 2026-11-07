@@ -17,3 +17,11 @@ patched = source[:start] + replacement + source[end:]
 temp = Path('.codex/.harden_db_read_write_boundary.runtime.py')
 temp.write_text(patched, encoding='utf-8')
 runpy.run_path(str(temp), run_name='__main__')
+
+# OptionsShared contains both an explicit write root and a read helper. The base
+# transform removes the write fallback first; migrate the remaining read helper.
+options_path = Path('core/OptionsSharedHelpers.lua')
+options = options_path.read_text(encoding='utf-8')
+options = options.replace('DB.GetSection', 'DB.ReadSection')
+options = options.replace('DB:GetSection', 'DB:ReadSection')
+options_path.write_text(options, encoding='utf-8')
