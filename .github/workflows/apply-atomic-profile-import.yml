@@ -1,6 +1,7 @@
 name: Apply atomic profile import
 
-# Every staged patch fragment is verified against its expected Git blob SHA.
+# The source patch is checksum-verified, then its two mover-tree conflicts are
+# rebased deterministically onto current main before validation.
 on:
   push:
     branches:
@@ -29,13 +30,63 @@ jobs:
           cat .codex/patches/import.part*.b64 | base64 --decode > /tmp/profile-import.patch
           echo "3083b1e11b3bd9e188f8ae257dea25b18d2fb641194974abac17eb8674e81a93  /tmp/profile-import.patch" | sha256sum --check -
 
-      - name: Apply patch
+      - name: Apply and rebase patch
         shell: bash
         run: |
           set -euo pipefail
-          git apply --check /tmp/profile-import.patch
-          git apply /tmp/profile-import.patch
+          git apply --check \
+            --exclude=core/PanelTransactions.lua \
+            --exclude=todo.md \
+            /tmp/profile-import.patch
+          git apply \
+            --exclude=core/PanelTransactions.lua \
+            --exclude=todo.md \
+            /tmp/profile-import.patch
+          python .codex/rebase_atomic_import.py
           git diff --check
+
+      - name: Audit import ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          profile_import = Path('core/ProfileImport.lua').read_text()
+          profile_transfer = Path('core/ProfileTransfer.lua').read_text()
+          panel = Path('core/PanelTransactions.lua').read_text()
+          toc = Path('FeelsGoodUI.toc').read_text()
+
+          required = {
+              'ProfileImport.Checkpoint': 'PanelTransactions:Checkpoint()',
+              'ProfileImport.RollbackAfter': 'PanelTransactions:RollbackAfter(checkpoint, keys)',
+              'PanelTransactions.HasPending': 'function Tx:HasPending()',
+              'PanelTransactions.ReplaceProfile': 'function Tx:ReplaceProfile(',
+              'TOC ProfileImport': 'core/ProfileImport.lua',
+          }
+          haystacks = {
+              'ProfileImport.Checkpoint': profile_import,
+              'ProfileImport.RollbackAfter': profile_import,
+              'PanelTransactions.HasPending': panel,
+              'PanelTransactions.ReplaceProfile': panel,
+              'TOC ProfileImport': toc,
+          }
+          for label, needle in required.items():
+              assert needle in haystacks[label], f'missing {label}'
+
+          forbidden = [
+              'DB:Init(',
+              'DB:ApplyRuntime(',
+              'Movers:ApplyUnlockFromDB(',
+              'Settings:InvalidateAllHistory(',
+              'Apply:RequestAll(',
+          ]
+          for needle in forbidden:
+              assert needle not in profile_transfer, f'direct import bypass remains: {needle}'
+
+          assert '## Version: 0.0.50' in toc
+          print('Atomic profile import ownership audit passed.')
+          PY
 
       - name: Validate addon
         shell: bash
