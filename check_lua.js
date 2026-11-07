@@ -138,6 +138,14 @@ try {
         }
     }
 
+    assertSourceIncludes('modules/ActionBarsState.lua', 'State._buttonRegistry');
+    assertSourceIncludes('modules/ActionBarsState.lua', 'function State.GetButtonRecord');
+    assertSourceIncludes('modules/ActionBarsVisuals.lua', 'Visuals._regionRegistry');
+    assertSourceIncludes('modules/ActionBarsVisuals.lua', 'local function GetRegionRecord');
+    assertSourceExcludes('modules/ActionBarsState.lua', /btn\.(?:__fgui|_fgui(?:Skinned|Module|AutoHideHooks))/, 'ActionButton runtime metadata');
+    assertSourceExcludes('modules/ActionBarsVisuals.lua', /(?:btn|hotkey|count|name|cooldown|timer)\._fgui/, 'ActionButton visual metadata');
+    assertSourceExcludes('modules/ActionBarsRuntime.lua', /button\.__fgui/, 'ActionButton callback metadata');
+
     assertSourceIncludes('modules/CompanionPetState.lua', 'function State:BeginButton');
     assertSourceIncludes('modules/CompanionPetState.lua', 'function State:FinishButton');
     assertSourceIncludes('modules/CompanionPetState.lua', 'function State:SuppressNativeBar');

@@ -10,6 +10,26 @@ local State = ns.ActionBarsState
 
 local InCombat = InCombatLockdown or function() return false end
 
+Visuals._regionRegistry = Visuals._regionRegistry or setmetatable({}, { __mode = "k" })
+local RegionRegistry = Visuals._regionRegistry
+
+local function GetButtonRecord(button, create)
+    if State and type(State.GetButtonRecord) == "function" then
+        return State.GetButtonRecord(button, create == true)
+    end
+    return nil
+end
+
+local function GetRegionRecord(region, create)
+    if not region then return nil end
+    local record = RegionRegistry[region]
+    if not record and create then
+        record = {}
+        RegionRegistry[region] = record
+    end
+    return record
+end
+
 local function Tex(btn, suffix)
     if not btn or not btn.GetName then return nil end
     local name = btn:GetName()
@@ -80,70 +100,78 @@ local function RefreshDefaultButtonArt(btn)
     HideDefaultStateTextures(btn)
 end
 
+local function ApplyTypography(region, button, style, size, point, relativePoint, x, y, justify)
+    if not region then return end
+    local record = GetRegionRecord(region, true)
+
+    if record.font ~= style.font or record.size ~= size or record.outline ~= style.outline then
+        Media:ApplyFont(region, style.font, size, style.outline)
+        record.font, record.size, record.outline = style.font, size, style.outline
+    end
+    if not record.anchored then
+        region:ClearAllPoints()
+        region:SetPoint(point, button, relativePoint, x, y)
+        region:SetJustifyH(justify)
+        record.anchored = true
+    end
+    region:SetDrawLayer("OVERLAY")
+end
+
 function Visuals.ApplyButtonTypography(btn, style)
     if not (btn and style) then return end
 
-    local hotkey = btn.HotKey or Tex(btn, "HotKey")
-    if hotkey then
-        if hotkey._fguiFont ~= style.font or hotkey._fguiSize ~= style.hotkeySize or hotkey._fguiOutline ~= style.outline then
-            Media:ApplyFont(hotkey, style.font, style.hotkeySize, style.outline)
-            hotkey._fguiFont, hotkey._fguiSize, hotkey._fguiOutline = style.font, style.hotkeySize, style.outline
-        end
-        if not hotkey._fguiAnchored then
-            hotkey:ClearAllPoints()
-            hotkey:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -1, -1)
-            hotkey:SetJustifyH("RIGHT")
-            hotkey._fguiAnchored = true
-        end
-        hotkey:SetDrawLayer("OVERLAY")
-    end
-
-    local count = btn.Count or Tex(btn, "Count")
-    if count then
-        if count._fguiFont ~= style.font or count._fguiSize ~= style.countSize or count._fguiOutline ~= style.outline then
-            Media:ApplyFont(count, style.font, style.countSize, style.outline)
-            count._fguiFont, count._fguiSize, count._fguiOutline = style.font, style.countSize, style.outline
-        end
-        if not count._fguiAnchored then
-            count:ClearAllPoints()
-            count:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -1, 1)
-            count:SetJustifyH("RIGHT")
-            count._fguiAnchored = true
-        end
-        count:SetDrawLayer("OVERLAY")
-    end
-
-    local name = btn.Name or Tex(btn, "Name")
-    if name then
-        local size = style.nameSize or style.hotkeySize
-        if name._fguiFont ~= style.font or name._fguiSize ~= size or name._fguiOutline ~= style.outline then
-            Media:ApplyFont(name, style.font, size, style.outline)
-            name._fguiFont, name._fguiSize, name._fguiOutline = style.font, size, style.outline
-        end
-        if not name._fguiAnchored then
-            name:ClearAllPoints()
-            name:SetPoint("BOTTOM", btn, "BOTTOM", 0, 1)
-            name:SetJustifyH("CENTER")
-            name._fguiAnchored = true
-        end
-        name:SetDrawLayer("OVERLAY")
-    end
+    ApplyTypography(
+        btn.HotKey or Tex(btn, "HotKey"),
+        btn,
+        style,
+        style.hotkeySize,
+        "TOPRIGHT",
+        "TOPRIGHT",
+        -1,
+        -1,
+        "RIGHT"
+    )
+    ApplyTypography(
+        btn.Count or Tex(btn, "Count"),
+        btn,
+        style,
+        style.countSize,
+        "BOTTOMRIGHT",
+        "BOTTOMRIGHT",
+        -1,
+        1,
+        "RIGHT"
+    )
+    ApplyTypography(
+        btn.Name or Tex(btn, "Name"),
+        btn,
+        style,
+        style.nameSize or style.hotkeySize,
+        "BOTTOM",
+        "BOTTOM",
+        0,
+        1,
+        "CENTER"
+    )
 end
 
 local function GetCooldownTimerText(cooldownFrame)
     if not cooldownFrame then return nil end
-    if cooldownFrame._fguiTimerText and cooldownFrame._fguiTimerText.GetObjectType and cooldownFrame._fguiTimerText:GetObjectType() == "FontString" then
-        return cooldownFrame._fguiTimerText
+    local record = GetRegionRecord(cooldownFrame, true)
+    local cached = record and record.timerText
+    if cached and cached.GetObjectType and cached:GetObjectType() == "FontString" then
+        return cached
     end
 
     local regions = { cooldownFrame:GetRegions() }
     for i = 1, #regions do
         local region = regions[i]
         if region and region.GetObjectType and region:GetObjectType() == "FontString" then
-            cooldownFrame._fguiTimerText = region
+            record.timerText = region
             return region
         end
     end
+    record.timerText = nil
     return nil
 end
 
@@ -152,13 +180,12 @@ function Visuals.StyleButtonCooldown(btn, style)
 
     local cooldown = btn.cooldown or btn.Cooldown or Tex(btn, "Cooldown")
     if not cooldown then return end
+    local cooldownRecord = GetRegionRecord(cooldown, true)
 
-    if not InCombat() then
-        if not cooldown._fguiAnchored then
-            cooldown:ClearAllPoints()
-            cooldown:SetAllPoints(btn)
-            cooldown._fguiAnchored = true
-        end
+    if not InCombat() and not cooldownRecord.anchored then
+        cooldown:ClearAllPoints()
+        cooldown:SetAllPoints(btn)
+        cooldownRecord.anchored = true
     end
 
     if cooldown.SetDrawEdge then cooldown:SetDrawEdge(false) end
@@ -168,48 +195,52 @@ function Visuals.StyleButtonCooldown(btn, style)
 
     local timer = GetCooldownTimerText(cooldown)
     if timer then
-        if timer._fguiFont ~= style.font or timer._fguiSize ~= style.cooldownSize or timer._fguiOutline ~= style.outline then
+        local timerRecord = GetRegionRecord(timer, true)
+        if timerRecord.font ~= style.font
+            or timerRecord.size ~= style.cooldownSize
+            or timerRecord.outline ~= style.outline then
             Media:ApplyFont(timer, style.font, style.cooldownSize, style.outline)
-            timer._fguiFont, timer._fguiSize, timer._fguiOutline = style.font, style.cooldownSize, style.outline
+            timerRecord.font = style.font
+            timerRecord.size = style.cooldownSize
+            timerRecord.outline = style.outline
         end
-        if not timer._fguiAnchored then
+        if not timerRecord.anchored then
             timer:ClearAllPoints()
             timer:SetPoint("CENTER", cooldown, "CENTER", 0, 0)
             timer:SetJustifyH("CENTER")
-            timer._fguiAnchored = true
+            timerRecord.anchored = true
         end
         timer:SetDrawLayer("OVERLAY")
     end
 end
 
 function Visuals.SkinButton(btn, style)
-    if not btn then
-        return
-    end
+    if not btn then return false end
+    local record = GetButtonRecord(btn, true)
+    if not record then return false end
 
-    if not btn._fguiSkinned then
-        btn._fguiSkinned = true
+    if not record.skinned then
+        record.skinned = true
         Media:CreateBorder(btn)
     end
 
     RefreshDefaultButtonArt(btn)
     if type(style) == "table" then
-        btn._fguiVisualStyle = style
+        record.visualStyle = style
         Visuals.ApplyButtonTypography(btn, style)
         Visuals.StyleButtonCooldown(btn, style)
     end
 
-    if State and State.InitializeButton then
-        State.InitializeButton(btn)
-    end
+    if State and State.InitializeButton then State.InitializeButton(btn) end
+    return true
 end
 
 function Visuals.SetButtonHotkey(btn, show)
-    local hotkey = btn.HotKey or Tex(btn, "HotKey")
-    if btn then
-        btn._fguiShowHotkeys = (show == true)
-    end
-    if not hotkey then return end
+    local record = GetButtonRecord(btn, true)
+    if record then record.showHotkeys = (show == true) end
+
+    local hotkey = btn and (btn.HotKey or Tex(btn, "HotKey")) or nil
+    if not hotkey then return false end
 
     if show then
         hotkey:SetAlpha(1)
@@ -218,42 +249,27 @@ function Visuals.SetButtonHotkey(btn, show)
         hotkey:SetAlpha(0)
         hotkey:Hide()
     end
+    return true
 end
 
 function Visuals.RefreshButtonVisualState(btn, style, showHotkeys)
-    if not (btn and btn._fguiSkinned) then
-        return false
-    end
+    local record = GetButtonRecord(btn, false)
+    if not (btn and record and record.skinned) then return false end
 
-    style = (type(style) == "table") and style or btn._fguiVisualStyle
-    if type(style) == "table" then
-        btn._fguiVisualStyle = style
-    end
-
-    if showHotkeys ~= nil then
-        btn._fguiShowHotkeys = (showHotkeys == true)
-    end
+    style = (type(style) == "table") and style or record.visualStyle
+    if type(style) == "table" then record.visualStyle = style end
+    if showHotkeys ~= nil then record.showHotkeys = (showHotkeys == true) end
 
     RefreshDefaultButtonArt(btn)
-
     if type(style) == "table" then
         Visuals.ApplyButtonTypography(btn, style)
         Visuals.StyleButtonCooldown(btn, style)
     end
 
-    Visuals.SetButtonHotkey(btn, btn._fguiShowHotkeys == true)
-
-    if State and State.InitializeButton then
-        State.InitializeButton(btn)
-    end
-
-    if btn.__fguiUpdateChecked then
-        btn.__fguiUpdateChecked(btn)
-    end
-    if btn.__fguiUpdateEmpty then
-        btn.__fguiUpdateEmpty(btn)
-    end
-
+    Visuals.SetButtonHotkey(btn, record.showHotkeys == true)
+    if State and State.InitializeButton then State.InitializeButton(btn) end
+    if State and State.UpdateButtonChecked then State.UpdateButtonChecked(btn) end
+    if State and State.UpdateButtonEmpty then State.UpdateButtonEmpty(btn) end
     return true
 end
 

@@ -8,6 +8,28 @@ local Movers = ns.Movers
 
 local InCombat = InCombatLockdown or function() return false end
 
+State._buttonRegistry = State._buttonRegistry or setmetatable({}, { __mode = "k" })
+local ButtonRegistry = State._buttonRegistry
+
+local function GetButtonRecord(button, create)
+    if not button then return nil end
+    local record = ButtonRegistry[button]
+    if not record and create then
+        record = { layers = {} }
+        ButtonRegistry[button] = record
+    end
+    return record
+end
+
+function State.GetButtonRecord(button, create)
+    return GetButtonRecord(button, create == true)
+end
+
+function State.IsManagedButton(button)
+    local record = GetButtonRecord(button, false)
+    return record and record.skinned == true or false
+end
+
 local function IsDetached(module)
     return type(module) ~= "table" or module._detached == true
 end
@@ -39,8 +61,10 @@ local function ForEachHolderButton(holder, fn)
 end
 
 local function EnsureStateLayers(btn)
-    if not btn or btn.__fguiStateLayers then return end
-    btn.__fguiStateLayers = true
+    local record = GetButtonRecord(btn, true)
+    if not record or record.stateLayers then return end
+    record.stateLayers = true
+    record.layers = record.layers or {}
 
     local hl = btn:CreateTexture(nil, "HIGHLIGHT")
     hl:SetAllPoints(btn)
@@ -59,9 +83,9 @@ local function EnsureStateLayers(btn)
     pr:SetBlendMode("ADD")
     pr:Hide()
 
-    btn.__fguiHL = hl
-    btn.__fguiCK = ck
-    btn.__fguiPR = pr
+    record.layers.highlight = hl
+    record.layers.checked = ck
+    record.layers.pressed = pr
 
     local dhl = btn.GetHighlightTexture and btn:GetHighlightTexture()
     if dhl then dhl:SetAlpha(0) end
@@ -70,25 +94,29 @@ local function EnsureStateLayers(btn)
     local pushed = btn.GetPushedTexture and btn:GetPushedTexture()
     if pushed then pushed:SetAlpha(0) end
 
-    btn:HookScript("OnEnter", function(b)
-        if b._fguiModule and b._fguiModule._detached == true then
-            return
-        end
-        if b.__fguiHL then b.__fguiHL:Show() end
+    btn:HookScript("OnEnter", function(button)
+        local current = GetButtonRecord(button, false)
+        local owner = current and current.module
+        if owner and owner._detached == true then return end
+        local layer = current and current.layers and current.layers.highlight
+        if layer then layer:Show() end
     end)
-    btn:HookScript("OnLeave", function(b)
-        if b.__fguiHL then b.__fguiHL:Hide() end
+    btn:HookScript("OnLeave", function(button)
+        local current = GetButtonRecord(button, false)
+        local layer = current and current.layers and current.layers.highlight
+        if layer then layer:Hide() end
     end)
 end
 
 local function EnsureSlotBG(btn)
-    if not btn or btn.__fguiSlotBG then return end
+    local record = GetButtonRecord(btn, true)
+    if not record or record.slotBackground then return end
 
     local bg = btn:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints(btn)
     bg:SetColorTexture(1, 1, 1, 0.02)
     bg:Hide()
-    btn.__fguiSlotBG = bg
+    record.slotBackground = bg
 end
 
 local function GetActionID(btn)
@@ -124,36 +152,41 @@ local function ShouldShowEmpty(btn)
 end
 
 local function UpdateEmptySlot(btn)
-    if not btn or not btn._fguiSkinned then return end
-    if btn._fguiModule and btn._fguiModule._detached == true then return end
+    local record = GetButtonRecord(btn, false)
+    if not (btn and record and record.skinned) then return end
+    if record.module and record.module._detached == true then return end
     EnsureSlotBG(btn)
+    record = GetButtonRecord(btn, false)
 
     local holder = btn.GetParent and btn:GetParent() or nil
     local holderAutoHidden = (holder and holder._fguiAutoHidden == true) or false
     local empty = IsEmptySlot(btn)
+    local background = record and record.slotBackground
 
     if not empty then
-        if btn.__fguiSlotBG then btn.__fguiSlotBG:Hide() end
+        if background then background:Hide() end
         btn:SetAlpha(1)
         SetMouseEnabledSafe(btn, not holderAutoHidden)
         return
     end
 
     if ShouldShowEmpty(btn) then
-        if btn.__fguiSlotBG then btn.__fguiSlotBG:Show() end
+        if background then background:Show() end
         btn:SetAlpha(0.35)
         SetMouseEnabledSafe(btn, not holderAutoHidden)
         return
     end
 
-    if btn.__fguiSlotBG then btn.__fguiSlotBG:Hide() end
+    if background then background:Hide() end
     btn:SetAlpha(0)
     SetMouseEnabledSafe(btn, false)
 end
 
 local function UpdateButtonChecked(btn)
-    if not (btn and btn.__fguiCK) then return end
-    if btn._fguiModule and btn._fguiModule._detached == true then return end
+    local record = GetButtonRecord(btn, false)
+    local layer = record and record.layers and record.layers.checked
+    if not (btn and layer) then return end
+    if record.module and record.module._detached == true then return end
 
     local checked = false
     if btn.GetChecked then
@@ -163,50 +196,47 @@ local function UpdateButtonChecked(btn)
         checked = (btn.Checked:IsShown() == true)
     end
 
-    if checked then
-        btn.__fguiCK:Show()
-    else
-        btn.__fguiCK:Hide()
-    end
+    if checked then layer:Show() else layer:Hide() end
 end
 
+State.UpdateButtonChecked = UpdateButtonChecked
+State.UpdateButtonEmpty = UpdateEmptySlot
+
 function State.InitializeButton(btn)
-    if not btn or not btn._fguiSkinned then
-        return
-    end
+    local record = GetButtonRecord(btn, false)
+    if not (btn and record and record.skinned) then return false end
 
     EnsureSlotBG(btn)
     EnsureStateLayers(btn)
-
-    btn.__fguiUpdateChecked = UpdateButtonChecked
-    btn.__fguiUpdateEmpty = UpdateEmptySlot
-
     UpdateButtonChecked(btn)
     UpdateEmptySlot(btn)
+    return true
 end
 
 function State.AttachButtonAutoHideHooks(btn, module)
-    if not btn or btn._fguiAutoHideHooks then
-        return
-    end
+    local record = GetButtonRecord(btn, true)
+    if not record then return false end
 
     local owner = module or ns.ActionBars
-    btn._fguiModule = owner
-    btn._fguiAutoHideHooks = true
+    record.module = owner
+    if record.autoHideHooks then return true end
+
+    record.autoHideHooks = true
     btn:HookScript("OnEnter", function()
         State.QueueAutoHideUpdate(owner)
     end)
     btn:HookScript("OnLeave", function()
         State.QueueAutoHideUpdate(owner)
     end)
+    return true
 end
 
 local function SetHolderButtonsMouse(holder, enabled)
     ForEachHolderButton(holder, function(btn)
         if btn.IsShown and btn:IsShown() then
             if enabled then
-                if btn.__fguiUpdateEmpty then
-                    btn.__fguiUpdateEmpty(btn)
+                if State.IsManagedButton(btn) then
+                    UpdateEmptySlot(btn)
                 else
                     SetMouseEnabledSafe(btn, true)
                 end
@@ -349,12 +379,8 @@ local function RunButtonVisualSync(module, btn, updateChecked, updateEmpty)
             return
         end
     end
-    if updateChecked and btn.__fguiUpdateChecked then
-        btn.__fguiUpdateChecked(btn)
-    end
-    if updateEmpty and btn.__fguiUpdateEmpty then
-        btn.__fguiUpdateEmpty(btn)
-    end
+    if updateChecked then UpdateButtonChecked(btn) end
+    if updateEmpty then UpdateEmptySlot(btn) end
 end
 
 function State.EnsureStateHooks(module)
@@ -389,9 +415,7 @@ function State.EnsureStateHooks(module)
     if type(baseActionButtonMixin) == "table" and type(baseActionButtonMixin.SetShowGrid) == "function" then
         hooksecurefunc(baseActionButtonMixin, "SetShowGrid", function(btn)
             if IsDetached(module) then return end
-            if btn and btn.__fguiUpdateEmpty then
-                btn.__fguiUpdateEmpty(btn)
-            end
+            UpdateEmptySlot(btn)
         end)
     end
 
@@ -407,7 +431,9 @@ function State.EnsureStateHooks(module)
     if type(spellAlertManager) == "table" and type(spellAlertManager.ShowAlert) == "function" then
         hooksecurefunc(spellAlertManager, "ShowAlert", function(_, btn)
             if IsDetached(module) or not btn then return end
-            if btn.__fguiPR then btn.__fguiPR:Show() end
+            local record = GetButtonRecord(btn, false)
+            local pressed = record and record.layers and record.layers.pressed
+            if pressed then pressed:Show() end
             local overlay = btn.SpellActivationAlert or btn.overlay
             if overlay and overlay.SetAlpha then
                 overlay:SetAlpha(0)
@@ -419,9 +445,9 @@ function State.EnsureStateHooks(module)
     if type(spellAlertManager) == "table" and type(spellAlertManager.HideAlert) == "function" then
         hooksecurefunc(spellAlertManager, "HideAlert", function(_, btn)
             if IsDetached(module) then return end
-            if btn and btn.__fguiPR then
-                btn.__fguiPR:Hide()
-            end
+            local record = GetButtonRecord(btn, false)
+            local pressed = record and record.layers and record.layers.pressed
+            if pressed then pressed:Hide() end
         end)
     end
 end
@@ -435,9 +461,7 @@ function State.RefreshEmptySlots(module)
         local holder = module.bars[i]
         if holder and holder.buttons then
             ForEachHolderButton(holder, function(btn)
-                if btn.__fguiUpdateEmpty then
-                    btn.__fguiUpdateEmpty(btn)
-                end
+                UpdateEmptySlot(btn)
             end)
         end
     end
