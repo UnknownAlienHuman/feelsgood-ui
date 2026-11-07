@@ -4,7 +4,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 
 ## Retail 12.1.5 implementation status
 
-- [x] Target Interface `120105` and release `0.0.55`.
+- [x] Target Interface `120105` and release `0.0.56`.
 - [x] Gate Secret/Restricted Values before Lua inspection, conversion, comparison, or formatting.
 - [x] Integrate restricted Unit Frame and Center Bar handling into the canonical render/target owners; remove late method overrides and duplicate producer calls.
 - [x] Keep opaque power/text on exact native sinks where available; otherwise render an explicit unavailable state.
@@ -25,6 +25,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 - [x] Enforce one DB read/write boundary across core and feature families: `ReadSection` is pure, `EnsureSection` is explicit mutation, the compatibility `GetSection` no longer creates data, and static checks reject first-party runtime use of it.
 - [x] Isolate LibDBIcon from SavedVariables: use a detached minimap proxy during drag, commit one normalized position on drag stop, restore persisted state on failure/cancel, and remove the dead per-addon radius field.
 - [x] Make ExperienceBar native takeover narrow and reversible: capture alpha/mouse state without hiding foreign frames, keep one lifecycle apply owner, re-suppress after Blizzard refreshes, and restore only properties still carrying addon-owned values.
+- [x] Make CenterBars class-resource takeover narrow and reversible: keep snapshots/hooks on the owner, never stamp or Hide/Show/Setup foreign frames, handle native frame replacement, and preserve newer conflicting alpha/mouse changes on release.
 
 ## Required in-game validation
 
@@ -50,6 +51,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 - [ ] Remove a UnitFrames section/size/scale field in a test profile after DB initialization, then create/apply frames; runtime must use defaults without recreating or mutating the missing persisted field, while the next explicit DB/schema normalization repairs it.
 - [ ] Target aura filtering handles ordinary and inaccessible aura-source payloads without indexing denied tables or fields.
 - [ ] Center bars handle ordinary and restricted power/rune values without duplicate producer calls, error loops, retained opaque samples, or stale text.
+- [ ] Across DK/Rogue/Druid/Paladin/Monk/Warlock/Mage/Evoker, give native class-resource frames distinctive alpha/mouse/visibility states, trigger OnShow, replace a named frame, toggle suppression in combat, and verify zero addon Hide/Show/Setup calls, exact owned-property restore, and preservation of newer conflicting changes.
 - [ ] Companion micro-menu/bag hooks coalesce repeated show/hide/layout requests instead of bypassing the queue; detach cancels both apply and micro-layout generations.
 - [ ] Force a normal field apply handler to return `false`; profile value and its newly-created `Undo last` artifact both disappear, later keys do not execute, and previously applied owners restore.
 - [ ] Force `Undo last` apply failure; the pre-undo profile and exact consumed undo entry return, and the panel refreshes after rollback.

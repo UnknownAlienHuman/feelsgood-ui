@@ -896,70 +896,133 @@ function Render.UpdateRunes(owner)
     end
 end
 
-local function SoftHideFrame(frame)
-    if not frame then
-        return
-    end
-    pcall(frame.SetAlpha, frame, 0)
-    pcall(frame.Hide, frame)
+local function ReadNativeFrameAlpha(frame)
+    if not (frame and type(frame.GetAlpha) == "function") then return nil end
+    local ok, value = pcall(frame.GetAlpha, frame)
+    return ok and type(value) == "number" and value or nil
 end
 
-local function RestoreFrameSuppression(frame)
-    if not frame then
-        return
-    end
-    frame._fguiSuppressRequested = nil
-    pcall(frame.SetAlpha, frame, 1)
-    if type(frame.Setup) == "function" then
-        pcall(frame.Setup, frame)
-        return
-    end
-    pcall(frame.Show, frame)
+local function ReadNativeFrameMouseEnabled(frame)
+    if not (frame and type(frame.IsMouseEnabled) == "function") then return nil end
+    local ok, value = pcall(frame.IsMouseEnabled, frame)
+    if not ok or type(value) ~= "boolean" then return nil end
+    return value
 end
 
-local function EnsureFrameHideHook(frame)
-    if not frame or frame._fguiSuppressHooked then
-        return
+local function SetNativeFrameAlpha(frame, value)
+    if not (frame and type(frame.SetAlpha) == "function" and type(value) == "number") then
+        return false
     end
-    if type(frame.HookScript) == "function" then
-        pcall(frame.HookScript, frame, "OnShow", function(self)
-            if self._fguiSuppressRequested then
-                SoftHideFrame(self)
+    if ReadNativeFrameAlpha(frame) == value then return true end
+    return pcall(frame.SetAlpha, frame, value)
+end
+
+local function SetNativeFrameMouseEnabled(frame, enabled)
+    if not (frame and type(frame.EnableMouse) == "function" and type(enabled) == "boolean") then
+        return false
+    end
+    if ReadNativeFrameMouseEnabled(frame) == enabled then return true end
+    return pcall(frame.EnableMouse, frame, enabled)
+end
+
+local function ApplyClassResourceSuppression(frame)
+    if not frame then return false end
+    SetNativeFrameAlpha(frame, 0)
+    SetNativeFrameMouseEnabled(frame, false)
+    return true
+end
+
+local function RestoreClassResourceRecord(record)
+    local frame = record and record.frame
+    if not frame then return false end
+
+    -- Restore only values that still carry our suppression state. A newer
+    -- conflicting owner wins and is never overwritten during detach/disable.
+    if type(record.alpha) == "number" and ReadNativeFrameAlpha(frame) == 0 then
+        SetNativeFrameAlpha(frame, record.alpha)
+    end
+    if type(record.mouseEnabled) == "boolean" and ReadNativeFrameMouseEnabled(frame) == false then
+        SetNativeFrameMouseEnabled(frame, record.mouseEnabled)
+    end
+    return true
+end
+
+local function GetClassResourceRegistry(owner)
+    if type(owner._classResourceSuppression) ~= "table" then
+        owner._classResourceSuppression = {}
+    end
+    return owner._classResourceSuppression
+end
+
+local function EnsureClassResourceShowHook(owner, frame)
+    if not (owner and frame and type(frame.HookScript) == "function") then
+        return false
+    end
+
+    owner._classResourceSuppressionHooks = type(owner._classResourceSuppressionHooks) == "table"
+        and owner._classResourceSuppressionHooks
+        or {}
+    if owner._classResourceSuppressionHooks[frame] then return true end
+
+    local ok = pcall(frame.HookScript, frame, "OnShow", function(shownFrame)
+        if owner._classResourceSuppressionActive ~= true then return end
+        for _, record in pairs(owner._classResourceSuppression or EMPTY) do
+            if record.frame == shownFrame then
+                ApplyClassResourceSuppression(shownFrame)
+                return
             end
-        end)
+        end
+    end)
+    if ok then
+        owner._classResourceSuppressionHooks[frame] = true
     end
-    frame._fguiSuppressHooked = true
+    return ok
 end
 
-local function GetSuppressedFrameRegistry(owner)
-    if type(owner._suppressedClassResourceFrames) ~= "table" then
-        owner._suppressedClassResourceFrames = {}
+local function SuppressClassResourceFrame(owner, name, frame)
+    if type(owner) ~= "table" or type(name) ~= "string" or name == "" or not frame then
+        return false
     end
-    return owner._suppressedClassResourceFrames
+
+    local registry = GetClassResourceRegistry(owner)
+    local record = registry[name]
+    if record and record.frame ~= frame then
+        RestoreClassResourceRecord(record)
+        registry[name] = nil
+        record = nil
+    end
+
+    if not record then
+        record = {
+            frame = frame,
+            alpha = ReadNativeFrameAlpha(frame),
+            mouseEnabled = ReadNativeFrameMouseEnabled(frame),
+        }
+        registry[name] = record
+    end
+
+    EnsureClassResourceShowHook(owner, frame)
+    return ApplyClassResourceSuppression(frame)
 end
 
 function Render.RestoreDefaultClassResources(owner)
-    if type(owner) ~= "table" then
-        return
-    end
+    if type(owner) ~= "table" then return false end
 
     owner._pendingClassResourceSync = nil
+    owner._classResourceSuppressionActive = false
 
-    local registry = owner._suppressedClassResourceFrames
-    if type(registry) ~= "table" then
-        return
-    end
+    local registry = owner._classResourceSuppression
+    if type(registry) ~= "table" then return true end
 
-    for name, frame in pairs(registry) do
-        RestoreFrameSuppression(frame)
+    for name, record in pairs(registry) do
+        RestoreClassResourceRecord(record)
         registry[name] = nil
     end
+    return true
 end
 
 function Render.SyncDefaultClassResources(owner)
-    if type(owner) ~= "table" then
-        return
-    end
+    if type(owner) ~= "table" then return false end
 
     local center = GetCenterCfg()
     local hideNames = owner._hideFrames
@@ -969,36 +1032,36 @@ function Render.SyncDefaultClassResources(owner)
 
     if _G.InCombatLockdown and InCombatLockdown() then
         owner._pendingClassResourceSync = true
-        return
+        return true
     end
 
     owner._pendingClassResourceSync = nil
-
     if not shouldHide then
-        Render.RestoreDefaultClassResources(owner)
-        return
+        return Render.RestoreDefaultClassResources(owner)
     end
 
-    local registry = GetSuppressedFrameRegistry(owner)
+    owner._classResourceSuppressionActive = true
+    local registry = GetClassResourceRegistry(owner)
     local activeNames = {}
 
-    for _, name in ipairs(hideNames) do
-        activeNames[name] = true
-        local frame = name and _G[name]
-        if frame then
-            EnsureFrameHideHook(frame)
-            frame._fguiSuppressRequested = true
-            registry[name] = frame
-            SoftHideFrame(frame)
+    for i = 1, #hideNames do
+        local name = hideNames[i]
+        if type(name) == "string" and name ~= "" then
+            activeNames[name] = true
+            local frame = _G[name]
+            if frame then
+                SuppressClassResourceFrame(owner, name, frame)
+            end
         end
     end
 
-    for name, frame in pairs(registry) do
+    for name, record in pairs(registry) do
         if not activeNames[name] then
-            RestoreFrameSuppression(frame)
+            RestoreClassResourceRecord(record)
             registry[name] = nil
         end
     end
+    return true
 end
 
 function Render.HideDefaultClassResources(owner)
