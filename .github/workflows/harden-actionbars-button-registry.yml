@@ -1,0 +1,102 @@
+name: Harden ActionBars button registries
+
+on:
+  push:
+    branches:
+      - codex/actionbars-button-registry
+    paths:
+      - '.github/workflows/harden-actionbars-button-registry.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Apply registry transform
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .codex/harden_actionbars_button_registry.py
+          git diff --check
+
+      - name: Audit foreign-frame metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          state = Path('modules/ActionBarsState.lua').read_text()
+          visuals = Path('modules/ActionBarsVisuals.lua').read_text()
+          runtime = Path('modules/ActionBarsRuntime.lua').read_text()
+          check = Path('check_lua.js').read_text()
+
+          required_state = [
+              'State._buttonRegistry',
+              'function State.GetButtonRecord',
+              'function State.IsManagedButton',
+              'State.UpdateButtonChecked = UpdateButtonChecked',
+              'State.UpdateButtonEmpty = UpdateEmptySlot',
+          ]
+          for needle in required_state:
+              assert needle in state, f'missing button registry contract: {needle}'
+
+          required_visuals = [
+              'Visuals._regionRegistry',
+              'local function GetRegionRecord',
+              'record.visualStyle',
+              'record.showHotkeys',
+              'record.timerText',
+          ]
+          for needle in required_visuals:
+              assert needle in visuals, f'missing region registry contract: {needle}'
+
+          forbidden_state = re.compile(r'btn\.(?:__fgui|_fgui(?:Skinned|Module|AutoHideHooks))')
+          forbidden_visuals = re.compile(r'(?:btn|hotkey|count|name|cooldown|timer)\._fgui')
+          assert not forbidden_state.search(state), 'button metadata remains in ActionBarsState'
+          assert not forbidden_visuals.search(visuals), 'region metadata remains in ActionBarsVisuals'
+          assert 'button.__fgui' not in runtime
+          assert 'ActionButton runtime metadata' in check
+          assert 'ActionButton visual metadata' in check
+          print('ActionBars registry ownership audit passed.')
+          PY
+
+      - name: Run Lua registry harnesses
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v lua5.1 >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y lua5.1
+          fi
+          lua5.1 .codex/test_actionbars_state_registry.lua
+          lua5.1 .codex/test_actionbars_visual_registry.lua
+
+      - name: Validate addon
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm test
+
+      - name: Commit validated result
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .codex
+          rm -f .github/workflows/harden-actionbars-button-registry.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Move ActionBars metadata into registries" -m "Keep ActionButton layers, callbacks, owner/style/hotkey state and FontString/Cooldown typography caches in weak-key owner registries instead of Blizzard object fields. Release FeelsGoodUI 0.0.60."
+          git push origin HEAD:codex/actionbars-button-registry
