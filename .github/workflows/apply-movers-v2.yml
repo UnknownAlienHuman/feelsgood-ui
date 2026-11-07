@@ -40,8 +40,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git apply --recount --check /tmp/movers-patches/01-movers-geometry.patch
-          git apply --recount /tmp/movers-patches/01-movers-geometry.patch
+          git apply --3way /tmp/movers-patches/01-movers-geometry.patch
           git apply --recount --check /tmp/movers-patches/02-movers-fixes.patch
           git apply --recount /tmp/movers-patches/02-movers-fixes.patch
           git diff --check
