@@ -78,12 +78,6 @@ jobs:
           if marker not in source:
               raise SystemExit('checker insertion point not found')
           checker.write_text(source.replace(marker, addition, 1))
-
-          workflow = Path('.github/workflows/validate.yml')
-          source = workflow.read_text()
-          if 'actions/checkout@v4' not in source:
-              raise SystemExit('validate checkout version not found')
-          workflow.write_text(source.replace('actions/checkout@v4', 'actions/checkout@v6', 1))
           PY
           git diff --check
 
@@ -95,12 +89,11 @@ jobs:
           npm test
           grep -F 'RestorePreview(spec.applyKeys)' core/MoversTransactions.lua
 
-      - name: Commit fix
+      - name: Commit code fix
         shell: bash
         run: |
           set -euo pipefail
-          git rm .github/workflows/fix-preview-restore.yml
-          git add -A
+          git add core/MoversTransactions.lua check_lua.js
           git diff --cached --check
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
