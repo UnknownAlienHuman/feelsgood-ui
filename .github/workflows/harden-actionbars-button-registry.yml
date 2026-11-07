@@ -6,6 +6,7 @@ on:
       - codex/actionbars-button-registry
     paths:
       - '.github/workflows/harden-actionbars-button-registry.yml'
+      - '.codex/fix_actionbars_registry_fixture.py'
 
 permissions:
   contents: write
@@ -26,6 +27,7 @@ jobs:
         run: |
           set -euo pipefail
           python .codex/harden_actionbars_button_registry.py
+          python .codex/fix_actionbars_registry_fixture.py
           git diff --check
 
       - name: Audit foreign-frame metadata
@@ -40,6 +42,7 @@ jobs:
           visuals = Path('modules/ActionBarsVisuals.lua').read_text()
           runtime = Path('modules/ActionBarsRuntime.lua').read_text()
           check = Path('check_lua.js').read_text()
+          fixture = Path('.codex/test_actionbars_state_registry.lua').read_text()
 
           required_state = [
               'State._buttonRegistry',
@@ -68,6 +71,8 @@ jobs:
           assert 'button.__fgui' not in runtime
           assert 'ActionButton runtime metadata' in check
           assert 'ActionButton visual metadata' in check
+          assert 'local function FireHooks(name)' in fixture
+          assert 'Hook order is intentionally irrelevant' in fixture
           print('ActionBars registry ownership audit passed.')
           PY
 
