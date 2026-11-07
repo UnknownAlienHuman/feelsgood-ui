@@ -7,13 +7,15 @@ start = source.index("check = replace_once(\n    check,\n", source.index("check_
 end = source.index("check_path.write_text(check, encoding='utf-8')", start)
 replacement = '''check = replace_once(
     check,
-    "    for (const name of [\\n",
+    "    for (const name of [\\n"
+    "        'modules/ActionBarsEditMode.lua',\\n",
     "    assertSourceExcludes('modules/UnitFramesPolicy.lua', /profile\\\\s*\\\\[\\\\s*section\\\\s*\\\\]\\\\s*=/, 'runtime UnitFrames section creation');\\n"
     "    assertSourceExcludes('modules/UnitFramesPolicy.lua', /function\\\\s+Policy\\\\.NormalizeUF/, 'runtime UnitFrames normalizer owner');\\n"
     "    assertSourceExcludes('modules/UnitFramesRuntime.lua', /NormalizeUF/, 'runtime UnitFrames profile normalization call');\\n"
     "    assertSourceExcludes('modules/UnitFramesRender.lua', /NormalizeUF/, 'render-time UnitFrames profile normalization call');\\n"
     "    assertSourceIncludes('modules/UnitFramesPolicy.lua', 'local EMPTY = {}');\\n\\n"
-    "    for (const name of [\\n",
+    "    for (const name of [\\n"
+    "        'modules/ActionBarsEditMode.lua',\\n",
     'UnitFrames config-purity contracts',
 )
 '''
