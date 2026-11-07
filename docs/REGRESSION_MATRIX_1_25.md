@@ -48,7 +48,7 @@ Execution rule: every run records the exact client build, addon revision, result
 | 19 | Configure action bars out of combat | Geometry, visibility, bindings, and Blizzard shell handoff apply once |  |  |
 | 20 | Change action-bar settings during combat | Protected work defers and coalesces; applies once after combat |  |  |
 | 21 | Disable/re-enable action bars and reload after setting a distinctive native multi-bar toggle vector | Exact pre-attach Blizzard toggles and shell state restore after reload or detach; recovery marker clears after restore; addon profile bars do not change; no detached delayed callback re-enters |  |  |
-| 22 | Companion micro menu, bags, and pet bar lifecycle | Controls attach, update, restore, and detach without duplicate ownership |  |  |
+| 22 | Companion micro menu, bags, and pet bar lifecycle, including repeated border restyling | Controls attach, update, restore, and detach without duplicate ownership; border objects are reused and target Blizzard frames receive no `__fguiBorder*` metadata |  |  |
 | 23 | Experience/reputation/honor states plus repeated enable/disable and native manager refresh | Correct custom bar is shown; native status frames retain visibility ownership, receive no addon `Hide`/`Show`, and restore captured alpha/mouse state without overwriting newer conflicting changes |  |  |
 | 24 | Theme/media/minimap icon/profile switch; drag icon and force one minimap apply failure | Fonts/textures/colors remain coherent; drag preview writes only the proxy, mouse-up commits once, no-op drag creates no transaction, and failure restores the persisted position |  |  |
 | 25 | Full combat smoke with taint logging enabled | No `ADDON_ACTION_BLOCKED`, `ADDON_ACTION_FORBIDDEN`, or repeating errors |  |  |

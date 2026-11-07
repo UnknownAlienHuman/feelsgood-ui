@@ -123,13 +123,21 @@ try {
         if (firstParty && !tocSet.has(name)) {
             errors.push(`FeelsGoodUI.toc: first-party Lua file is not loaded: '${name}'`);
         }
-        if (firstParty && name !== 'core/DB.lua') {
+        if (firstParty) {
             const source = fs.readFileSync(file, 'utf8');
-            if (/\b(?:DB|db)(?:\.|:)\s*GetSection\b/.test(source)) {
+            if (name !== 'core/DB.lua' && /\b(?:DB|db)(?:\.|:)\s*GetSection\b/.test(source)) {
                 errors.push(`${name}: use DB:ReadSection for reads or DB:EnsureSection for writes; GetSection is compatibility-only`);
+            }
+            if (/__fguiBorder(?:Size)?/.test(source)) {
+                errors.push(`${name}: border ownership must stay in Media's registry, not on target frames`);
             }
         }
     }
+
+    assertSourceIncludes('core/Media.lua', 'Media._borderRegistry');
+    assertSourceIncludes('core/Media.lua', 'function Media:GetBorder(frame)');
+    assertSourceIncludes('core/Media.lua', 'function Media:SetBorderColor(frame, r, g, b, a)');
+    assertSourceIncludes('modules/CompanionPetBar.lua', 'Media:SetBorderColor(button, 0, 0, 0, 0)');
 
     assertSourceIncludes('modules/CenterBarsRender.lua', 'owner._classResourceSuppression');
     assertSourceIncludes('modules/CenterBarsRender.lua', 'EnsureClassResourceShowHook');

@@ -298,8 +298,8 @@ local function RestorePetButton(button)
         hotkey:Show()
     end
 
-    if button.__fguiBorder and button.__fguiBorder.SetBackdropBorderColor then
-        button.__fguiBorder:SetBackdropBorderColor(0, 0, 0, 0)
+    if Media and type(Media.SetBorderColor) == "function" then
+        Media:SetBorderColor(button, 0, 0, 0, 0)
     end
 end
 
