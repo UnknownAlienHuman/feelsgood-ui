@@ -6,6 +6,7 @@ on:
       - codex/companion-owner-state
     paths:
       - '.github/workflows/harden-companion-owner-state.yml'
+      - '.codex/run_harden_companion_owner_state.py'
 
 permissions:
   contents: write
@@ -55,10 +56,12 @@ jobs:
               'module._bagCountTextByButton',
               'module._compactBagSummary',
               'return false, "Companion micro/bag apply deferred in combat"',
+              'return true, "Companion micro layout retry queued"',
           ]
           for needle in required_micro:
               assert needle in micro, f'missing owner-state contract: {needle}'
 
+          assert micro.count('return true, "Companion micro layout retry queued"') == 3
           assert 'return false, "Pet action buttons unavailable"' in pet
           assert 'local petApplied, petDetail' in runtime
           assert 'local microApplied, microDetail' in runtime
