@@ -1,0 +1,104 @@
+name: Fix mover preview restore
+
+on:
+  push:
+    branches:
+      - codex/movers-transaction-owner-v2
+    paths:
+      - '.github/workflows/fix-preview-restore.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  fix-and-validate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Harden preview failure recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('core/MoversTransactions.lua')
+          source = path.read_text()
+
+          old = '''        if not ok then
+              return false, first
+          end
+          if first == false then
+              return false, second or ("Mover " .. operation .. " preview returned false")
+          end
+          '''
+          new = '''        if not ok then
+              RestorePreview(spec.applyKeys)
+              return false, first
+          end
+          if first == false then
+              RestorePreview(spec.applyKeys)
+              return false, second or ("Mover " .. operation .. " preview returned false")
+          end
+          '''
+          if old not in source:
+              raise SystemExit('preview failure block not found')
+          source = source.replace(old, new, 1)
+
+          old = '''    if not okSnapshots then
+              RestorePreview(applyKeys)
+              LogError("Mover transaction snapshot failed: " .. tostring(writeSnapshots))
+              return false, writeSnapshots
+          end
+          '''
+          new = '''    if not okSnapshots or type(writeSnapshots) ~= "table" then
+              local detail = okSnapshots and "Mover transaction snapshot unavailable" or writeSnapshots
+              RestorePreview(applyKeys)
+              LogError("Mover transaction snapshot failed: " .. tostring(detail))
+              return false, detail
+          end
+          '''
+          if old not in source:
+              raise SystemExit('snapshot failure block not found')
+          path.write_text(source.replace(old, new, 1))
+
+          checker = Path('check_lua.js')
+          source = checker.read_text()
+          marker = "    assertSourceIncludes('core/MoversTransactions.lua', 'CaptureWriteSnapshots');\n"
+          addition = marker + "    assertSourceIncludes('core/MoversTransactions.lua', 'RestorePreview(spec.applyKeys)');\n"
+          if marker not in source:
+              raise SystemExit('checker insertion point not found')
+          checker.write_text(source.replace(marker, addition, 1))
+
+          workflow = Path('.github/workflows/validate.yml')
+          source = workflow.read_text()
+          if 'actions/checkout@v4' not in source:
+              raise SystemExit('validate checkout version not found')
+          workflow.write_text(source.replace('actions/checkout@v4', 'actions/checkout@v6', 1))
+          PY
+          git diff --check
+
+      - name: Validate repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm test
+          grep -F 'RestorePreview(spec.applyKeys)' core/MoversTransactions.lua
+
+      - name: Commit fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/fix-preview-restore.yml
+          git add -A
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Restore failed mover previews'
+          git push origin "HEAD:${GITHUB_REF_NAME}"
