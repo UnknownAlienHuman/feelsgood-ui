@@ -13,6 +13,8 @@ local unpack = unpack or table.unpack
 local HIDE_KICK_DELAYS = { 0, 1, 2, 5 }
 local MANAGED_POSITIONS_REFRESH_DELAY = 0.05
 local MANAGED_POSITIONS_REFRESH_KEY = "FGUI_AB_MANAGED_POSITIONS"
+local NATIVE_TOGGLE_RECOVERY_KEY = "_actionBarsNativeToggleRecovery"
+local NATIVE_TOGGLE_RECOVERY_VERSION = 1
 
 local BLIZZARD_ART_FRAME_NAMES = {
     "MainMenuBarCluster",
@@ -48,6 +50,88 @@ local function GetActionBarsCfg()
         return DB:GetSection("actionbars") or {}
     end
     return {}
+end
+
+local function CopyToggleVector(values, count)
+    if type(values) ~= "table" then return nil end
+    count = tonumber(count) or #values
+    if count < 4 then return nil end
+
+    local copy = {}
+    for i = 1, count do copy[i] = values[i] end
+    return copy, count
+end
+
+local function GetNativeToggleRecoveryRoot()
+    local root = DB and type(DB.data) == "table" and DB.data or _G.FeelsGoodUIDB
+    return type(root) == "table" and root or nil
+end
+
+local function GetNativeToggleRecoveryID()
+    if type(_G.UnitGUID) == "function" then
+        local guid = _G.UnitGUID("player")
+        if type(guid) == "string" and guid ~= "" then
+            return guid
+        end
+    end
+
+    if type(_G.UnitFullName) == "function" then
+        local name, realm = _G.UnitFullName("player")
+        if type(name) == "string" and name ~= "" then
+            return name .. "-" .. tostring(realm or "")
+        end
+    end
+    return "default"
+end
+
+local function ReadPersistedNativeActionBarToggles()
+    local root = GetNativeToggleRecoveryRoot()
+    local recovery = root and root[NATIVE_TOGGLE_RECOVERY_KEY] or nil
+    if type(recovery) ~= "table" or recovery.version ~= NATIVE_TOGGLE_RECOVERY_VERSION
+        or type(recovery.records) ~= "table" then
+        return nil
+    end
+
+    local record = recovery.records[GetNativeToggleRecoveryID()]
+    if type(record) ~= "table" then return nil end
+    local values, count = CopyToggleVector(record.values, record.count)
+    if not values then return nil end
+    return values, count
+end
+
+local function PersistNativeActionBarToggles(values, count)
+    local root = GetNativeToggleRecoveryRoot()
+    local copy, resolvedCount = CopyToggleVector(values, count)
+    if not root or not copy then return false end
+
+    local recovery = root[NATIVE_TOGGLE_RECOVERY_KEY]
+    if type(recovery) ~= "table" or recovery.version ~= NATIVE_TOGGLE_RECOVERY_VERSION then
+        recovery = {
+            version = NATIVE_TOGGLE_RECOVERY_VERSION,
+            records = {},
+        }
+        root[NATIVE_TOGGLE_RECOVERY_KEY] = recovery
+    end
+    recovery.records = type(recovery.records) == "table" and recovery.records or {}
+    recovery.records[GetNativeToggleRecoveryID()] = {
+        values = copy,
+        count = resolvedCount,
+    }
+    return true
+end
+
+local function ClearPersistedNativeActionBarToggles()
+    local root = GetNativeToggleRecoveryRoot()
+    local recovery = root and root[NATIVE_TOGGLE_RECOVERY_KEY] or nil
+    if type(recovery) ~= "table" or type(recovery.records) ~= "table" then
+        return false
+    end
+
+    recovery.records[GetNativeToggleRecoveryID()] = nil
+    if next(recovery.records) == nil then
+        root[NATIVE_TOGGLE_RECOVERY_KEY] = nil
+    end
+    return true
 end
 
 local function ReadActionBarToggles()
@@ -91,16 +175,20 @@ local function CaptureNativeActionBarToggles(module, values)
         return true
     end
 
-    values = values or ReadActionBarToggles()
-    if type(values) ~= "table" then
-        return false
+    local persistedValues, persistedCount = ReadPersistedNativeActionBarToggles()
+    local snapshot, count
+    if persistedValues then
+        snapshot, count = persistedValues, persistedCount
+    else
+        values = values or ReadActionBarToggles()
+        snapshot, count = CopyToggleVector(values)
+        if not snapshot then return false end
+        PersistNativeActionBarToggles(snapshot, count)
     end
 
-    local snapshot = {}
-    for i = 1, #values do snapshot[i] = values[i] end
     module._nativeActionBarToggles = {
         values = snapshot,
-        count = #snapshot,
+        count = count,
     }
     return true
 end
@@ -122,6 +210,7 @@ local function RestoreNativeActionBarToggles(module)
     local restored = ApplyActionBarToggles(snapshot.values, snapshot.count)
     if restored then
         module._nativeActionBarToggles = nil
+        ClearPersistedNativeActionBarToggles()
     end
     return restored
 end
