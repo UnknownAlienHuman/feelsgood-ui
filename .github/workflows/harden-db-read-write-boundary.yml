@@ -1,0 +1,84 @@
+name: Harden DB read/write boundary
+
+on:
+  push:
+    branches:
+      - codex/db-read-write-boundary
+    paths:
+      - '.github/workflows/harden-db-read-write-boundary.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Apply ownership transform
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .codex/harden_db_read_write_boundary.py
+          git diff --check
+
+      - name: Audit section ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          db = Path('core/DB.lua').read_text()
+          assert 'function DB:ReadSection(section)' in db
+          assert 'return self:ReadSection(section)' in db
+          get_body = db.split('function DB:GetSection(section)', 1)[1].split('function DB:ShouldHideBlizzardActionBars()', 1)[0]
+          assert 'EnsureSection' not in get_body
+
+          offenders = []
+          for root in ('core', 'modules'):
+              for path in Path(root).rglob('*.lua'):
+                  if path.as_posix() == 'core/DB.lua':
+                      continue
+                  source = path.read_text()
+                  if re.search(r'\b(?:DB|db)(?:\.|:)\s*GetSection\b', source):
+                      offenders.append(path.as_posix())
+          assert not offenders, f'first-party GetSection readers remain: {offenders}'
+          print('DB section ownership audit passed.')
+          PY
+
+      - name: Run Lua ownership harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v lua5.1 >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y lua5.1
+          fi
+          lua5.1 .codex/test_db_read_write_boundary.lua
+
+      - name: Validate addon
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm test
+
+      - name: Commit validated result
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .codex
+          rm -f .github/workflows/harden-db-read-write-boundary.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Separate DB section reads from writes" -m "Add a pure ReadSection API, make GetSection compatibility-only and non-mutating, migrate first-party runtime readers, reserve EnsureSection for explicit write owners, and enforce the boundary statically. Release FeelsGoodUI 0.0.53."
+          git push origin HEAD:codex/db-read-write-boundary
