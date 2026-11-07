@@ -242,14 +242,42 @@ PreviewPetLayout = function(module, size, spacing)
         return false, "Pet bar holder unavailable"
     end
 
-    holder:SetSize((Shared.PET_BUTTONS * size) + ((Shared.PET_BUTTONS - 1) * spacing), size)
+    local pending = {}
     for i = 1, Shared.PET_BUTTONS do
         local button = _G["PetActionButton" .. i]
         if button then
-            button:SetParent(holder)
-            button:ClearAllPoints()
-            button:SetPoint("LEFT", holder, "LEFT", (i - 1) * (size + spacing), 0)
-            button:SetSize(size, size)
+            local components = BuildPetButtonComponents(button)
+            local captured, detail = PetState:BeginButton(module, i, button, components)
+            if captured ~= true then
+                return false, detail or "Pet action button preview capture failed"
+            end
+            pending[#pending + 1] = {
+                index = i,
+                button = button,
+                components = components,
+            }
+        else
+            PetState:ReleaseButton(module, i)
+        end
+    end
+
+    holder:SetSize((Shared.PET_BUTTONS * size) + ((Shared.PET_BUTTONS - 1) * spacing), size)
+    for i = 1, #pending do
+        local entry = pending[i]
+        local button = entry.button
+        button:SetParent(holder)
+        button:ClearAllPoints()
+        button:SetPoint("LEFT", holder, "LEFT", (entry.index - 1) * (size + spacing), 0)
+        button:SetSize(size, size)
+
+        local finished, detail = PetState:FinishButton(
+            module,
+            entry.index,
+            button,
+            entry.components
+        )
+        if finished ~= true then
+            return false, detail or "Managed pet action button preview capture failed"
         end
     end
     return true

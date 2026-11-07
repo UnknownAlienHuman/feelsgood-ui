@@ -149,6 +149,8 @@ try {
     assertSourceIncludes('modules/CompanionPetState.lua', 'if currentShown == managed.shown then');
     assertSourceIncludes('modules/CompanionPetBar.lua', 'release = ReleasePetButtonStyle');
     assertSourceIncludes('modules/CompanionPetBar.lua', 'PetState:BeginButton');
+    assertSourceIncludes('modules/CompanionPetBar.lua', 'local pending = {}');
+    assertSourceIncludes('modules/CompanionPetBar.lua', 'Managed pet action button preview capture failed');
     assertSourceIncludes('modules/CompanionPetBar.lua', 'PetState:FinishButton');
     assertSourceIncludes('modules/CompanionPetBar.lua', 'PetState:RestoreAll(module)');
     assertSourceExcludes('modules/CompanionPetBar.lua', /RestoreTextureAlpha/, 'default-value pet texture restore');
