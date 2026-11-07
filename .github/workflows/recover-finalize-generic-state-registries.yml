@@ -1,0 +1,111 @@
+name: Recover and finalize generic state registries
+
+on:
+  push:
+    branches:
+      - codex/generic-state-registries
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  recover:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout latest branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Generate release when needed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! grep -Fq '## Version: 0.0.61' FeelsGoodUI.toc; then
+            test -f .codex/run_harden_generic_state_registries.py
+            test -f .codex/fix_generic_state_registry_fixtures.py
+            python .codex/run_harden_generic_state_registries.py
+            python .codex/fix_generic_state_registry_fixtures.py
+          fi
+          git diff --check
+
+      - name: Audit generated ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq '## Version: 0.0.61' FeelsGoodUI.toc
+          grep -Fq 'Animate._frameRegistry' core/Animate.lua
+          grep -Fq 'Animate._timerRegistry' core/Animate.lua
+          grep -Fq 'local state = GetFrameState(frame, true)' core/Animate.lua
+          grep -Fq 'local state = GetFrameState(frame, false)' core/Animate.lua
+          grep -Fq 'local dragHookRegistry = setmetatable' core/MinimapIcon.lua
+          grep -Fq 'local draggingButton = nil' core/MinimapIcon.lua
+          grep -Fq 'if draggingButton ~= stoppedButton then return end' core/MinimapIcon.lua
+          ! grep -Eq '_fguiAnimate(State|Timers)|group\._fgui' core/Animate.lua
+          ! grep -Fq '_fguiTransactionalDragHooked' core/MinimapIcon.lua
+          ! grep -Fq 'function U.GetCooldownTimerText' core/Utils.lua
+
+      - name: Install Lua 5.1
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v lua5.1 >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y lua5.1
+          fi
+
+      - name: Run ownership harnesses
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f .codex/test_animate_registries.lua
+          test -f .codex/test_minimap_hook_registry.lua
+          lua5.1 .codex/test_animate_registries.lua
+          lua5.1 .codex/test_minimap_hook_registry.lua
+
+      - name: Validate addon
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm test
+
+      - name: Commit clean validated branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .codex
+          rm -f .github/workflows/harden-generic-state-registries.yml
+          rm -f .github/workflows/finalize-generic-state-registries.yml
+          rm -f .github/workflows/recover-finalize-generic-state-registries.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "Move generic runtime state into registries" -m "Keep Animate fade/timer state and Minimap LibDBIcon hook state in weak-key addon registries, bind active drag to the exact button, and remove the dead arbitrary cooldown-frame cache helper. Release FeelsGoodUI 0.0.61."
+          fi
+          git push origin HEAD:codex/generic-state-registries
+
+      - name: Ready and merge pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          pr_number="$(gh pr list \
+            --repo "$GITHUB_REPOSITORY" \
+            --head codex/generic-state-registries \
+            --base main \
+            --state open \
+            --json number \
+            --jq '.[0].number')"
+          test -n "$pr_number"
+          gh pr ready "$pr_number" --repo "$GITHUB_REPOSITORY"
+          gh pr merge "$pr_number" \
+            --repo "$GITHUB_REPOSITORY" \
+            --squash \
+            --subject "Move generic runtime state into registries" \
+            --body "Keep Animate fade/timer state and Minimap LibDBIcon hook state in weak-key addon registries, bind active drag to the exact button, and remove the dead arbitrary cooldown-frame cache helper. Release FeelsGoodUI 0.0.61."
