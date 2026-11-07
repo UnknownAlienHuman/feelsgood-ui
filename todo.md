@@ -28,7 +28,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 - [x] Make CenterBars class-resource takeover narrow and reversible: keep snapshots/hooks on the owner, never stamp or Hide/Show/Setup foreign frames, handle native frame replacement, and preserve newer conflicting alpha/mouse changes on release.
 - [x] Move border ownership out of target frames: `Media` now keeps weak-key records, exposes explicit lookup/color APIs, and static validation rejects `__fguiBorder*` metadata anywhere in first-party Lua.
 - [x] Move Companion hooks/count caches/summaries off Blizzard frames and make PetBar/MicroBags apply result-aware; failed layers clean partial presentation, while transient PetActionButton creation queues an event-driven retry instead of disabling Companion.
-- [x] Journal PetActionButton takeover in `CompanionPetState`: exact original and managed layout/visibility/texture/text/cooldown/native-bar-alpha properties restore only when still addon-owned, preserving newer external changes and frame replacement.
+- [x] Journal PetActionButton takeover in `CompanionPetState`: separate structural layout from dynamic visibility ownership, reopen snapshots on component replacement, refuse unreadable mutable components, and restore exact still-owned texture/text/cooldown/native-bar-alpha state.
 
 ## Required in-game validation
 

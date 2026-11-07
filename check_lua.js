@@ -143,6 +143,10 @@ try {
     assertSourceIncludes('modules/CompanionPetState.lua', 'function State:SuppressNativeBar');
     assertSourceIncludes('modules/CompanionPetState.lua', 'function State:RestoreAll');
     assertSourceIncludes('modules/CompanionPetState.lua', 'pcall(record.release, record.button)');
+    assertSourceIncludes('modules/CompanionPetState.lua', 'ValidateCapturedComponents');
+    assertSourceIncludes('modules/CompanionPetState.lua', 'ComponentsMatch');
+    assertSourceIncludes('modules/CompanionPetState.lua', 'local structuralOwned = parentKnown');
+    assertSourceIncludes('modules/CompanionPetState.lua', 'if currentShown == managed.shown then');
     assertSourceIncludes('modules/CompanionPetBar.lua', 'release = ReleasePetButtonStyle');
     assertSourceIncludes('modules/CompanionPetBar.lua', 'PetState:BeginButton');
     assertSourceIncludes('modules/CompanionPetBar.lua', 'PetState:FinishButton');

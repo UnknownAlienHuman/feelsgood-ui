@@ -216,6 +216,102 @@ local function CaptureTextRegion(region)
     }
 end
 
+local function HasMethods(object, ...)
+    if not object then return false end
+    for i = 1, select("#", ...) do
+        if type(object[select(i, ...)]) ~= "function" then return false end
+    end
+    return true
+end
+
+local function ValidateCapturedComponents(state, components)
+    local icon = components.icon
+    if icon and not (
+        state.icon and state.icon.points and state.icon.texCoord
+        and HasMethods(icon, "ClearAllPoints", "SetPoint", "SetTexCoord")
+    ) then
+        return false
+    end
+
+    local highlight = components.highlight
+    if highlight and not (
+        state.highlight and state.highlight.points and type(state.highlight.alpha) == "number"
+        and HasMethods(highlight, "ClearAllPoints", "SetPoint", "SetAlpha")
+    ) then
+        return false
+    end
+
+    local cooldown = components.cooldown
+    if cooldown and not (
+        state.cooldown and state.cooldown.points
+        and HasMethods(cooldown, "ClearAllPoints", "SetPoint")
+    ) then
+        return false
+    end
+
+    local iconMask = components.iconMask
+    if iconMask and not (
+        state.iconMask and type(state.iconMask.shown) == "boolean"
+        and HasMethods(iconMask, "Show", "Hide")
+    ) then
+        return false
+    end
+
+    local name = components.name
+    if name and not (
+        state.name and state.name.textKnown and type(state.name.shown) == "boolean"
+        and HasMethods(name, "SetText", "Show", "Hide")
+    ) then
+        return false
+    end
+
+    local hotkey = components.hotkey
+    if hotkey and not (
+        state.hotkey and type(state.hotkey.alpha) == "number"
+        and type(state.hotkey.shown) == "boolean"
+        and HasMethods(hotkey, "SetAlpha", "Show", "Hide")
+    ) then
+        return false
+    end
+
+    for key, object in pairs(components.alphas or {}) do
+        local captured = state.alphas[key]
+        if object and not (
+            captured and captured.object == object and type(captured.alpha) == "number"
+            and HasMethods(object, "SetAlpha")
+        ) then
+            return false
+        end
+    end
+    return true
+end
+
+local function CapturedObject(record)
+    return record and record.object or nil
+end
+
+local function ComponentsMatch(original, components)
+    if type(original) ~= "table" then return false end
+    if CapturedObject(original.icon) ~= components.icon
+        or CapturedObject(original.highlight) ~= components.highlight
+        or CapturedObject(original.cooldown) ~= components.cooldown
+        or CapturedObject(original.iconMask) ~= components.iconMask
+        or CapturedObject(original.name) ~= components.name
+        or CapturedObject(original.hotkey) ~= components.hotkey then
+        return false
+    end
+
+    local capturedAlphas = original.alphas or {}
+    local currentAlphas = components.alphas or {}
+    for key, object in pairs(currentAlphas) do
+        if CapturedObject(capturedAlphas[key]) ~= object then return false end
+    end
+    for key, captured in pairs(capturedAlphas) do
+        if CapturedObject(captured) ~= currentAlphas[key] then return false end
+    end
+    return true
+end
+
 local function CaptureButtonState(button, components)
     local layout = CaptureLayout(button)
     if not layout then return nil end
@@ -237,6 +333,7 @@ local function CaptureButtonState(button, components)
             alpha = ReadAlpha(object),
         }
     end
+    if not ValidateCapturedComponents(state, components) then return nil end
     return state
 end
 
@@ -271,18 +368,35 @@ local function RestoreLayout(original, managed)
     local currentShown = ReadShown(object)
     local currentHitRect = ReadHitRect(object)
 
-    local owned = parentKnown
+    local structuralOwned = parentKnown
         and parent == managed.parent
         and currentPoints and PointsEqual(currentPoints, managed.points)
         and currentSize
         and NumberEqual(currentSize.width, managed.size.width)
         and NumberEqual(currentSize.height, managed.size.height)
-        and currentShown == managed.shown
 
-    if owned and managed.hitRect then
-        owned = currentHitRect and HitRectEqual(currentHitRect, managed.hitRect)
+    if structuralOwned and managed.hitRect then
+        structuralOwned = currentHitRect and HitRectEqual(currentHitRect, managed.hitRect)
     end
-    if owned then ForceRestoreLayout(original) end
+    if structuralOwned then
+        if type(object.SetParent) == "function" then object:SetParent(original.parent) end
+        RestorePoints(object, original.points)
+        if type(object.SetSize) == "function" then
+            object:SetSize(original.size.width, original.size.height)
+        end
+        if original.hitRect and type(object.SetHitRectInsets) == "function" then
+            object:SetHitRectInsets(
+                original.hitRect.left,
+                original.hitRect.right,
+                original.hitRect.top,
+                original.hitRect.bottom
+            )
+        end
+    end
+
+    if currentShown == managed.shown then
+        SetShown(object, original.shown)
+    end
 end
 
 local function RestoreRegion(original, managed)
@@ -403,23 +517,27 @@ function State:BeginButton(module, index, button, components)
         return false, "Invalid pet-button state owner"
     end
 
+    components = type(components) == "table" and components or {}
     local registry = GetRegistry(module)
     local record = registry[index]
-    if record and record.button ~= button then
+    if record and (
+        record.button ~= button
+        or not ComponentsMatch(record.original, components)
+    ) then
         RestoreButtonRecord(record)
         registry[index] = nil
         record = nil
     end
 
     if not record then
-        local original = CaptureButtonState(button, components or {})
+        local original = CaptureButtonState(button, components)
         if not original then
             return false, "Pet action button state is unreadable"
         end
         record = {
             button = button,
             original = original,
-            release = components and components.release or nil,
+            release = components.release,
         }
         registry[index] = record
     end
