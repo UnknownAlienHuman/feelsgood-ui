@@ -25,7 +25,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python .codex/harden_actionbars_native_state.py
+          python .codex/run_harden_actionbars_native_state.py
           git diff --check
 
       - name: Audit profile and native ownership
@@ -43,6 +43,9 @@ jobs:
           assert 'barsCfg[4].enabled =' not in shell
           assert 'barsCfg[5].enabled =' not in shell
           assert 'ab.autoHide =' not in runtime
+          assert 'hideBlizzard and false or' not in shell
+          assert '(not hideBlizzard) and IsBarEnabled(4)' in shell
+          assert '(not hideBlizzard) and IsBarEnabled(5)' in shell
           assert 'CaptureNativeActionBarToggles' in shell
           assert 'RestoreNativeActionBarToggles' in shell
           assert 'implicit Blizzard-to-profile sidebar import' in check
@@ -75,5 +78,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "Make ActionBars native takeover reversible" -m "Stop importing Blizzard side-bar state into the addon profile, keep runtime normalization read-only, snapshot native action-bar toggles before takeover, avoid redundant writes, and restore the exact baseline on detach. Release FeelsGoodUI 0.0.51."
+          git commit -m "Make ActionBars native takeover reversible" -m "Stop importing Blizzard side-bar state into the addon profile, keep runtime normalization read-only, fix hidden-sidebar toggle logic, snapshot native action-bar toggles before takeover, avoid redundant writes, and restore the exact baseline on detach. Release FeelsGoodUI 0.0.51."
           git push origin HEAD:codex/actionbars-config-purity
