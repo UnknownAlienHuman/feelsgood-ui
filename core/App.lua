@@ -368,6 +368,13 @@ function App:OnAddonLoaded(loadedName)
 end
 
 function App:OnPlayerLogin()
+    Guard("ActionBars.RestorePersistedNativeState", function()
+        local shell = ns.ActionBarsBlizzardShell
+        if shell and type(shell.RestorePersistedNativeActionBarToggles) == "function" then
+            shell.RestorePersistedNativeActionBarToggles()
+        end
+    end)
+
     Guard("App.EnableFeatureModules", function()
         self:EnableFeatureModules()
     end)

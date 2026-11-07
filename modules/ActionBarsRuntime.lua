@@ -374,8 +374,8 @@ function Runtime.ApplyNow(module)
     module:EnsureCreated()
     module:EnsureAutoHideHooks()
 
-    ab.autoHide = (type(ab.autoHide) == "table") and ab.autoHide or {}
-    module._autoHideEnabled = (ab.autoHide.enabled == true)
+    local autoHide = (type(ab.autoHide) == "table") and ab.autoHide or nil
+    module._autoHideEnabled = autoHide and autoHide.enabled == true or false
 
     for id = 1, ACTION_BAR_COUNT do
         ApplyFrameLayer(module.bars and module.bars[id], "LOW", 10)
@@ -383,9 +383,6 @@ function Runtime.ApplyNow(module)
 
     local barsCfg = (type(ab.bars) == "table") and ab.bars or {}
 
-    if Shell and Shell.ImportSideBarStateFromBlizzard then
-        Shell.ImportSideBarStateFromBlizzard(module, barsCfg)
-    end
     if Shell and Shell.EnsureBlizzardMultiBars then
         Shell.EnsureBlizzardMultiBars(module, barsCfg)
     end

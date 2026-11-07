@@ -45,7 +45,7 @@ Execution rule: every run records the exact client build, addon revision, result
 | 18 | Point resources across supported classes/specs | Segment count/fill/color follows current max and caps safely |  |  |
 | 19 | Configure action bars out of combat | Geometry, visibility, bindings, and Blizzard shell handoff apply once |  |  |
 | 20 | Change action-bar settings during combat | Protected work defers and coalesces; applies once after combat |  |  |
-| 21 | Disable/re-enable action bars and reload | Blizzard-owned bars restore; no detached delayed callback re-enters |  |  |
+| 21 | Disable/re-enable action bars and reload after setting a distinctive native multi-bar toggle vector | Exact pre-attach Blizzard toggles and shell state restore after reload or detach; recovery marker clears after restore; addon profile bars do not change; no detached delayed callback re-enters |  |  |
 | 22 | Companion micro menu, bags, and pet bar lifecycle | Controls attach, update, restore, and detach without duplicate ownership |  |  |
 | 23 | Experience/reputation/honor states | Correct bar is shown; capped/unsupported states hide cleanly |  |  |
 | 24 | Theme/media/minimap icon/profile switch | Fonts, textures, colors, icon actions, and profile refresh remain coherent |  |  |

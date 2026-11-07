@@ -4,7 +4,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 
 ## Retail 12.1.5 implementation status
 
-- [x] Target Interface `120105` and release `0.0.50`.
+- [x] Target Interface `120105` and release `0.0.51`.
 - [x] Gate Secret/Restricted Values before Lua inspection, conversion, comparison, or formatting.
 - [x] Integrate restricted Unit Frame and Center Bar handling into the canonical render/target owners; remove late method overrides and duplicate producer calls.
 - [x] Keep opaque power/text on exact native sinks where available; otherwise render an explicit unavailable state.
@@ -20,6 +20,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 - [x] Route debug/perf/aura/minimap command and General-panel mutations through `Settings:SetTx -> Apply`; remove duplicate direct runtime writes and make `RuntimeSettings` the single owner of logging/perf application.
 - [x] Separate mover geometry preview from persistence: drag/resize hot paths mutate runtime frames only, terminal input creates one validated transaction, and failed/cancelled commits restore the persisted runtime owner.
 - [x] Stage profile import on a detached snapshot and commit through one profile-wide transaction; preserve live root identity/history until every immediate and combat-deferred runtime owner succeeds, restore the prior profile on any late failure, and persist a recovery record for interrupted imports.
+- [x] Make ActionBars native toggle takeover reversible: never copy Blizzard side-bar state into addon profile data, persist a per-character recovery vector across reload/interruption, avoid redundant `SetActionBarToggles` calls, and restore the exact pre-attach vector after out-of-combat or deferred detach.
 
 ## Required in-game validation
 
@@ -51,6 +52,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 - [ ] Make a newer successful field edit before an older deferred transaction fails; ownership-aware rollback preserves the newer value and table identity.
 - [ ] Reset a section, then successfully edit another field before reset fails; rollback restores the old section while overlaying the newer committed edit.
 - [ ] Disable ActionBars both out of combat and during combat; after combat, Blizzard shell is restored once and no stale delayed hide/apply callback reclaims it.
+- [ ] Before enabling ActionBars, set a distinctive Blizzard multi-bar toggle combination; addon apply must not alter `profile.actionbars.bars[4/5].enabled`, repeated identical applies must not rewrite native toggles, `/reload` must retain the original recovery vector, and detach must restore the exact original vector and remove its recovery record.
 - [ ] Rapid `Disable -> Enable` before queued callbacks fire does not execute an older lifecycle generation.
 - [ ] Enter/leave combat with action bars, movers, Edit Mode, profile apply/import/reset, and module disable/enable; no `ADDON_ACTION_BLOCKED` or `ADDON_ACTION_FORBIDDEN`.
 - [ ] Run every scenario in `docs/REGRESSION_MATRIX_1_25.md` with build/revision evidence.
