@@ -321,8 +321,6 @@ function Runtime:ApplyConfig(owner)
     end
 
     local defaults = (DB.defaults and DB.defaults.profile and DB.defaults.profile.unitframes) or {}
-    Call("NormalizeUFSizeTables", unitframesCfg, defaults)
-    Call("NormalizeUFScaleTables", unitframesCfg, defaults)
 
     local textCfg = unitframesCfg.text or {}
     local font = textCfg.font or GetSharedFontToken()

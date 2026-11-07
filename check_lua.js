@@ -156,6 +156,12 @@ try {
     assertSourceExcludes('modules/ActionBarsBlizzardShell.lua', /barsCfg\s*\[\s*[45]\s*\]\.enabled\s*=/, 'direct sidebar profile mutation');
     assertSourceExcludes('modules/ActionBarsRuntime.lua', /ab\.autoHide\s*=(?!=)/, 'runtime action-bar profile normalization');
 
+    assertSourceExcludes('modules/UnitFramesPolicy.lua', /profile\s*\[\s*section\s*\]\s*=/, 'runtime UnitFrames section creation');
+    assertSourceExcludes('modules/UnitFramesPolicy.lua', /function\s+Policy\.NormalizeUF/, 'runtime UnitFrames normalizer owner');
+    assertSourceExcludes('modules/UnitFramesRuntime.lua', /NormalizeUF/, 'runtime UnitFrames profile normalization call');
+    assertSourceExcludes('modules/UnitFramesRender.lua', /NormalizeUF/, 'render-time UnitFrames profile normalization call');
+    assertSourceIncludes('modules/UnitFramesPolicy.lua', 'local EMPTY = {}');
+
     for (const name of [
         'modules/ActionBarsEditMode.lua',
         'modules/CenterBars.lua',
