@@ -1,5 +1,6 @@
 name: Apply atomic profile import
 
+# Triggered after every patch chunk has been staged on the branch.
 on:
   push:
     branches:
