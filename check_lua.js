@@ -131,6 +131,16 @@ try {
         }
     }
 
+    assertSourceIncludes('modules/CenterBarsRender.lua', 'owner._classResourceSuppression');
+    assertSourceIncludes('modules/CenterBarsRender.lua', 'EnsureClassResourceShowHook');
+    assertSourceIncludes('modules/CenterBarsRender.lua', 'RestoreClassResourceRecord');
+    assertSourceIncludes('modules/CenterBarsRender.lua', 'ApplyClassResourceSuppression(record)');
+    assertSourceIncludes('modules/CenterBarsRender.lua', 'elseif registry[name] then');
+    assertSourceExcludes('modules/CenterBarsRender.lua', /pcall\(frame\.Hide,\s*frame\)/, 'native class-resource Hide takeover');
+    assertSourceExcludes('modules/CenterBarsRender.lua', /pcall\(frame\.Show,\s*frame\)/, 'native class-resource Show restore');
+    assertSourceExcludes('modules/CenterBarsRender.lua', /pcall\(frame\.Setup,\s*frame\)/, 'foreign class-resource Setup restore');
+    assertSourceExcludes('modules/CenterBarsRender.lua', /_fguiSuppress(?:Requested|Hooked)/, 'foreign class-resource ownership markers');
+
     assertSourceIncludes('modules/ExperienceBar.lua', 'SuppressBlizzardStatusTracking');
     assertSourceIncludes('modules/ExperienceBar.lua', 'module._statusTrackingSnapshot');
     assertSourceIncludes('modules/ExperienceBar.lua', 'MaintainStatusTrackingOwnership');

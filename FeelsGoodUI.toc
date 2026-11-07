@@ -2,7 +2,7 @@
 ## Title: FeelsGoodUI
 ## Notes: Minimalist oUF-based unitframes + custom secure action bars.
 ## Author: Neomorph
-## Version: 0.0.55
+## Version: 0.0.56
 ## SavedVariables: FeelsGoodUIDB
 ## RequiredDeps: oUF
 

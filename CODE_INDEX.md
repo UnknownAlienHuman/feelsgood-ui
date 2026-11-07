@@ -17,6 +17,7 @@
 | `modules/UnitFramesRuntime.lua`, `modules/UnitFramesRender.lua`, `modules/UnitFramesTarget.lua`, `modules/UnitFramesText.lua`, `modules/UnitFrames.lua` | Unit-frame lifecycle, rendering, target/aura observers, text safety, and facade wiring without persisted configuration repair. |
 | `modules/ActionBarsBlizzardShell.lua` | Reversible Blizzard shell/native-toggle takeover, per-character recovery across reload/interruption, exact detach restore, and managed-position synchronization. |
 | `modules/ActionBars.lua`, `modules/ActionBarsRuntime.lua`, `modules/ActionBarsState.lua`, `modules/ActionBarsVisuals.lua`, `modules/ActionBarsEditMode.lua` | Secure holders, event/lifecycle coordination, state, visuals, and mover integration without direct profile mutation. |
-| `modules/CenterBars*.lua`, `modules/Companion*.lua` | Center-resource and companion feature families. |
+| `modules/CenterBars*.lua` | Center-resource rendering/runtime plus reversible, conflict-aware Blizzard class-resource alpha/mouse ownership. |
+| `modules/Companion*.lua` | Companion pet-bar, micro-menu, bags, and lifecycle ownership. |
 | `modules/ExperienceBar.lua` | XP/reputation/honor presentation, single lifecycle apply owner, and reversible Blizzard status-tracking alpha/mouse suppression. |
 | `docs/` | Plans, archived work, architecture ledger, and regression material. |

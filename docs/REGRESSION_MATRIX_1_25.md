@@ -44,6 +44,7 @@ Execution rule: every run records the exact client build, addon revision, result
 | 16 | Center power with restricted values | StatusBar receives opaque values directly; no format/readback/error loop |  |  |
 | 17 | Death Knight runes, including restriction transition | Ordinary cooldowns animate; restricted state is explicit; timer tears down |  |  |
 | 18 | Point resources across supported classes/specs | Segment count/fill/color follows current max and caps safely |  |  |
+| 18a | Native class-resource takeover across supported classes, including OnShow, frame replacement, combat-deferred toggle, and conflicting external changes | No addon `Hide`/`Show`/`Setup` or foreign markers; owner-local alpha/mouse suppression restores exact still-owned values and preserves newer conflicts |  |  |
 | 19 | Configure action bars out of combat | Geometry, visibility, bindings, and Blizzard shell handoff apply once |  |  |
 | 20 | Change action-bar settings during combat | Protected work defers and coalesces; applies once after combat |  |  |
 | 21 | Disable/re-enable action bars and reload after setting a distinctive native multi-bar toggle vector | Exact pre-attach Blizzard toggles and shell state restore after reload or detach; recovery marker clears after restore; addon profile bars do not change; no detached delayed callback re-enters |  |  |
