@@ -6,6 +6,7 @@ on:
       - codex/db-read-write-boundary
     paths:
       - '.github/workflows/harden-db-read-write-boundary.yml'
+      - '.codex/run_harden_db_read_write_boundary.py'
 
 permissions:
   contents: write
@@ -25,7 +26,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python .codex/harden_db_read_write_boundary.py
+          python .codex/run_harden_db_read_write_boundary.py
           git diff --check
 
       - name: Audit section ownership
