@@ -1,0 +1,85 @@
+name: Harden interrupted profile import recovery
+
+on:
+  push:
+    branches:
+      - codex/atomic-profile-import-v2
+    paths:
+      - '.github/workflows/harden-import-recovery.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Add durable recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .codex/harden_import_recovery.py
+          git diff --check
+
+      - name: Audit recovery ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          profile = Path('core/ProfileImport.lua').read_text()
+          app = Path('core/App.lua').read_text()
+          readme = Path('README.md').read_text()
+
+          required = [
+              'local RECOVERY_KEY = "_profileImportRecovery"',
+              'function Import:RecoverInterrupted(root)',
+              'local function PrepareRecovery(snapshot)',
+              'ClearRecovery()',
+          ]
+          for needle in required:
+              assert needle in profile, f'missing recovery contract: {needle}'
+
+          recovery_pos = app.index('label = "ProfileImport.RecoverInterrupted"')
+          db_pos = app.index('label = "DB.Init"')
+          assert recovery_pos < db_pos, 'interrupted import recovery must run before DB.Init'
+          assert 'SavedVariables recovery record' in readme
+          print('Interrupted profile import ownership audit passed.')
+          PY
+
+      - name: Validate Lua recovery behavior
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v lua5.1 >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y lua5.1
+          fi
+          lua5.1 .codex/test_profile_recovery.lua
+
+      - name: Validate addon
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm test
+
+      - name: Commit validated result
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .codex
+          rm -f .github/workflows/harden-import-recovery.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Recover interrupted profile imports" -m "Persist a temporary recovery snapshot while import apply is pending, restore it before DB initialization after reload/logout, and preserve newer edits through an expected-state overlay."
+          git push origin HEAD:codex/atomic-profile-import-v2
