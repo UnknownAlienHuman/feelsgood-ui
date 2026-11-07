@@ -176,11 +176,16 @@ local function RequestManagedMicroRefresh()
 end
 
 local function HookMicroSourceWidgets(module)
-    if not module then return end
+    if not module then return false end
+
+    module._microSourceHooks = type(module._microSourceHooks) == "table"
+        and module._microSourceHooks
+        or {}
+    local hooks = module._microSourceHooks
 
     local microMenu = _G.MicroMenu
-    if microMenu and not microMenu._fguiCompanionHooked and type(microMenu.HookScript) == "function" then
-        microMenu._fguiCompanionHooked = true
+    if microMenu and not hooks[microMenu] and type(microMenu.HookScript) == "function" then
+        hooks[microMenu] = true
         microMenu:HookScript("OnShow", RequestManagedMicroRefresh)
         microMenu:HookScript("OnHide", RequestManagedMicroRefresh)
     end
@@ -188,12 +193,13 @@ local function HookMicroSourceWidgets(module)
     local microButtons = GetMicroButtons()
     for i = 1, #microButtons do
         local button = microButtons[i]
-        if button and not button._fguiCompanionHooked and type(button.HookScript) == "function" then
-            button._fguiCompanionHooked = true
+        if button and not hooks[button] and type(button.HookScript) == "function" then
+            hooks[button] = true
             button:HookScript("OnShow", RequestManagedMicroRefresh)
             button:HookScript("OnHide", RequestManagedMicroRefresh)
         end
     end
+    return true
 end
 
 local function StyleMicroButton(button, size)
@@ -454,13 +460,19 @@ local function GetBagSlotsSummary()
     return free, total
 end
 
-local function EnsureCompactBagCountText(button, profile)
-    if not button then return nil end
-    if button._fguiBagCountText and button._fguiBagCountText.GetObjectType and button._fguiBagCountText:GetObjectType() == "FontString" then
-        return button._fguiBagCountText
+local function EnsureCompactBagCountText(module, button, profile)
+    if not (module and button) then return nil end
+
+    module._bagCountTextByButton = type(module._bagCountTextByButton) == "table"
+        and module._bagCountTextByButton
+        or {}
+    local fontString = module._bagCountTextByButton[button]
+    if fontString and fontString.GetObjectType and fontString:GetObjectType() == "FontString" then
+        if type(fontString.Show) == "function" then fontString:Show() end
+        return fontString
     end
 
-    local fontString = button:CreateFontString(nil, "OVERLAY")
+    fontString = button:CreateFontString(nil, "OVERLAY")
     fontString:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -1, 1)
     fontString:SetJustifyH("RIGHT")
     fontString:SetJustifyV("BOTTOM")
@@ -469,7 +481,7 @@ local function EnsureCompactBagCountText(button, profile)
     local outline = ((Theme and Theme.GetFontOutline and Theme:GetFontOutline()) or "OUTLINE")
     Media:ApplyFont(fontString, font, 11, outline)
 
-    button._fguiBagCountText = fontString
+    module._bagCountTextByButton[button] = fontString
     return fontString
 end
 
@@ -479,17 +491,18 @@ local function UpdateCompactBagCountText(module, profile)
     if not button then return end
 
     local free, total = GetBagSlotsSummary()
-    local text = EnsureCompactBagCountText(button, profile)
+    local text = EnsureCompactBagCountText(module, button, profile)
     if not text then return end
 
     if type(free) ~= "number" or type(total) ~= "number" then
         text:SetText("")
+        module._compactBagSummary = nil
         return
     end
 
     text:SetText(tostring(free))
     text:SetTextColor(1.00, 0.92, 0.45, 1.00)
-    button._fguiBagSummary = string.format("%d/%d", free, total)
+    module._compactBagSummary = string.format("%d/%d", free, total)
 end
 
 local function HideAllBagButtons(bagButtons)
@@ -520,12 +533,18 @@ local function HideFrameSafe(frame)
 end
 
 local function ClearCompactBagState(module)
-    if module and module._compactBackpackButton and module._compactBackpackButton._fguiBagCountText then
-        module._compactBackpackButton._fguiBagCountText:SetText("")
+    if not module then return end
+
+    local button = module._compactBackpackButton
+    local texts = module._bagCountTextByButton
+    local text = button and type(texts) == "table" and texts[button] or nil
+    if text then
+        text:SetText("")
+        if type(text.Hide) == "function" then text:Hide() end
     end
-    if module then
-        module._compactBackpackButton = nil
-    end
+
+    module._compactBackpackButton = nil
+    module._compactBagSummary = nil
 end
 
 local function GetManagedBagAnchorTarget(anchor, microMenu, showMicro, gap)
@@ -688,9 +707,10 @@ local function ApplyManagedBagLayout(module, plan)
 end
 
 local function RestoreDefaultMicroLayout(module)
+    if not module then return false, "Companion micro/bag owner unavailable" end
     if Shared:IsInCombat() then
         module._pendingAfterCombat = true
-        return
+        return false, "Companion micro/bag restore deferred in combat"
     end
 
     if type(_G.MicroMenu) == "table" and type(_G.MicroMenu.ResetMicroMenuPosition) == "function" then
@@ -720,12 +740,11 @@ local function RestoreDefaultMicroLayout(module)
         SetBagCountShown(_G.MainMenuBarBackpackButton, true)
     end
 
-    if module then
-        ClearCompactBagState(module)
-        if module._microAnchor then
-            HideFrameSafe(module._microAnchor)
-        end
+    ClearCompactBagState(module)
+    if module._microAnchor then
+        HideFrameSafe(module._microAnchor)
     end
+    return true
 end
 
 local function ApplyMicroMenuOverride(anchor)
@@ -815,10 +834,10 @@ local function QueueMicroLayoutRetry(module)
 end
 
 function MicroBags:Apply(module, cp, profile)
-    if not (module and cp) then return end
+    if not (module and cp) then return false, "Companion micro/bag apply owner unavailable" end
     if Shared:IsInCombat() then
         module._pendingAfterCombat = true
-        return
+        return false, "Companion micro/bag apply deferred in combat"
     end
 
     local takeOver = Shared:ShouldTakeOverMicroAndBags()
@@ -828,8 +847,7 @@ function MicroBags:Apply(module, cp, profile)
     local bags = _G.BagsBar
 
     if not takeOver then
-        RestoreDefaultMicroLayout(module)
-        return
+        return RestoreDefaultMicroLayout(module)
     end
 
     if not showMicro and not showBags then
@@ -840,11 +858,11 @@ function MicroBags:Apply(module, cp, profile)
             HideFrameSafe(module._microAnchor)
         end
         ClearCompactBagState(module)
-        return
+        return true
     end
 
     local anchor = EnsureMicroAnchor(module)
-    if not anchor then return end
+    if not anchor then return false, "Companion micro-menu anchor unavailable" end
 
     local size = cp.buttonSize or 32
     local spacing = cp.spacing or 0
@@ -867,7 +885,7 @@ function MicroBags:Apply(module, cp, profile)
             if not HasStableMicroGeometry() then
                 module._applyingMicroLayout = nil
                 QueueMicroLayoutRetry(module)
-                return
+                return true, "Companion micro layout retry queued"
             end
 
             local usedOverride = ApplyMicroMenuOverride(anchor)
@@ -875,7 +893,7 @@ function MicroBags:Apply(module, cp, profile)
                 if not HasStableMicroGeometry() then
                     module._applyingMicroLayout = nil
                     QueueMicroLayoutRetry(module)
-                    return
+                    return true, "Companion micro layout retry queued"
                 end
 
                 microMenu.isStacked = false
@@ -889,7 +907,7 @@ function MicroBags:Apply(module, cp, profile)
                 if not okLayout then
                     module._applyingMicroLayout = nil
                     QueueMicroLayoutRetry(module)
-                    return
+                    return true, "Companion micro layout retry queued"
                 end
                 pcall(microMenu.SetParent, microMenu, anchor)
                 pcall(microMenu.ClearAllPoints, microMenu)
@@ -954,10 +972,11 @@ function MicroBags:Apply(module, cp, profile)
     end
 
     module._applyingMicroLayout = nil
+    return true
 end
 
 function MicroBags:EnsureHooks(module)
-    if not module then return end
+    if not module then return false, "Companion hook owner unavailable" end
 
     HookMicroSourceWidgets(module)
 
@@ -972,11 +991,16 @@ function MicroBags:EnsureHooks(module)
         end)
     end
 
+    module._bagTextureHooks = type(module._bagTextureHooks) == "table"
+        and module._bagTextureHooks
+        or {}
+    local bagHooks = module._bagTextureHooks
+
     local bagButtons = GetBagButtons()
     for i = 1, #bagButtons do
         local bagButton = bagButtons[i]
-        if bagButton and (not bagButton._fguiSquareSkinHooked) and type(bagButton.UpdateTextures) == "function" then
-            bagButton._fguiSquareSkinHooked = true
+        if bagButton and not bagHooks[bagButton] and type(bagButton.UpdateTextures) == "function" then
+            bagHooks[bagButton] = true
             hooksecurefunc(bagButton, "UpdateTextures", function(button)
                 local selfModule = ns.Companion
                 if not IsManagedModuleActive(selfModule) then return end
@@ -993,6 +1017,7 @@ function MicroBags:EnsureHooks(module)
             end)
         end
     end
+    return true
 end
 
 function MicroBags:CancelPendingLayoutRetry()
@@ -1001,7 +1026,7 @@ end
 
 function MicroBags:RestoreDefaultLayout(module)
     CancelRetryTimer()
-    RestoreDefaultMicroLayout(module)
+    return RestoreDefaultMicroLayout(module)
 end
 
 function MicroBags:UpdateCompactBagCountText(module, profile)

@@ -57,6 +57,7 @@ local function FinalizeDetach(module)
     end
 
     module._pendingAfterCombat = nil
+    module._pendingPetButtons = nil
     module._pendingDetachRestore = nil
     module._applyingMicroLayout = nil
     module._eventsAttached = false
@@ -118,24 +119,46 @@ local function HandleWatcherEvent(module, event, arg1)
 end
 
 function Runtime.ApplyCompanionConfig(module, profile)
-    if not IsReady(module) or IsDetached(module) or not HasCompanionLayers() then
-        return false
-    end
+    if not IsReady(module) then return false, "Companion apply owner unavailable" end
+    if IsDetached(module) then return false, "Companion is detached" end
+    if not HasCompanionLayers() then return false, "Companion internal layers unavailable" end
 
     local currentProfile = profile
     local cp = Shared:GetCompanionCfg(currentProfile)
-    MicroBags:EnsureHooks(module)
-    PetBar:Apply(module, cp, currentProfile)
-    MicroBags:Apply(module, cp, currentProfile)
+
+    local hooksReady, hookDetail = MicroBags:EnsureHooks(module)
+    if hooksReady ~= true then
+        return false, hookDetail or "Companion hooks unavailable"
+    end
+
+    local petApplied, petDetail = PetBar:Apply(module, cp, currentProfile)
+    if petApplied ~= true then
+        if type(PetBar.RestoreDefaultLayout) == "function" and not Shared:IsInCombat() then
+            PetBar:RestoreDefaultLayout(module)
+        end
+        return false, petDetail or "Companion pet-bar apply failed"
+    end
+
+    local microApplied, microDetail = MicroBags:Apply(module, cp, currentProfile)
+    if microApplied ~= true then
+        if not Shared:IsInCombat() then
+            if type(MicroBags.RestoreDefaultLayout) == "function" then
+                MicroBags:RestoreDefaultLayout(module)
+            end
+            if type(PetBar.RestoreDefaultLayout) == "function" then
+                PetBar:RestoreDefaultLayout(module)
+            end
+        end
+        return false, microDetail or "Companion micro/bag apply failed"
+    end
+
     MicroBags:UpdateCompactBagCountText(module, currentProfile)
-    return true
+    return true, microDetail
 end
 
 function Runtime.ApplyConfig(module, profile)
-    if not IsReady(module) or IsDetached(module) then
-        return false
-    end
-
+    if not IsReady(module) then return false, "Companion apply owner unavailable" end
+    if IsDetached(module) then return false, "Companion is detached" end
     return Runtime.ApplyCompanionConfig(module, profile)
 end
 
@@ -150,7 +173,10 @@ function Runtime.RequestApply(module)
     end
 
     if Safety and Safety.Debounce and Safety.Debounce(Shared.APPLY_DEBOUNCE_KEY, 0.03, function()
-        Runtime.ApplyConfig(GetActiveModule(module))
+        local applied, detail = Runtime.ApplyConfig(GetActiveModule(module))
+        if applied == false and Log and type(Log.Error) == "function" then
+            Log:Error("Companion apply failed: " .. tostring(detail or "unknown error"))
+        end
     end) then
         return true
     end
@@ -177,8 +203,12 @@ function Runtime.Init(module)
         return true
     end
 
+    local hooksReady, detail = MicroBags:EnsureHooks(module)
+    if hooksReady ~= true then
+        return false, detail or "Companion hooks unavailable"
+    end
+
     module._initDone = true
-    MicroBags:EnsureHooks(module)
     return true
 end
 
