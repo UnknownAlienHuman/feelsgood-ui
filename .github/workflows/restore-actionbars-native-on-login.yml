@@ -1,0 +1,78 @@
+name: Restore ActionBars native state on login
+
+on:
+  push:
+    branches:
+      - codex/actionbars-config-purity
+    paths:
+      - '.github/workflows/restore-actionbars-native-on-login.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Add pre-enable recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .codex/restore_actionbars_native_on_login.py
+          git diff --check
+
+      - name: Audit startup ordering
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          shell = Path('modules/ActionBarsBlizzardShell.lua').read_text()
+          app = Path('core/App.lua').read_text()
+          check = Path('check_lua.js').read_text()
+
+          assert 'function Shell.RestorePersistedNativeActionBarToggles()' in shell
+          assert 'ActionBars.RestorePersistedNativeState' in app
+          recovery = app.index('ActionBars.RestorePersistedNativeState')
+          enable = app.index('App.EnableFeatureModules')
+          assert recovery < enable, 'native recovery must precede ActionBars enable'
+          assert 'RestorePersistedNativeActionBarToggles' in check
+          print('ActionBars startup recovery audit passed.')
+          PY
+
+      - name: Run startup recovery harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v lua5.1 >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y lua5.1
+          fi
+          lua5.1 .codex/test_actionbars_login_recovery.lua
+
+      - name: Validate addon
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm test
+
+      - name: Commit validated result
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .codex
+          rm -f .github/workflows/restore-actionbars-native-on-login.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Restore ActionBars native state before reattach" -m "Consume a persisted native toggle baseline on PLAYER_LOGIN before feature enable, and allow detach to fall back to the durable record when an in-memory snapshot is unavailable."
+          git push origin HEAD:codex/actionbars-config-purity
