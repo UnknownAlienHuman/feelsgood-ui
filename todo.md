@@ -4,7 +4,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 
 ## Retail 12.1.5 implementation status
 
-- [x] Target Interface `120105` and release `0.0.49`.
+- [x] Target Interface `120105` and release `0.0.50`.
 - [x] Gate Secret/Restricted Values before Lua inspection, conversion, comparison, or formatting.
 - [x] Integrate restricted Unit Frame and Center Bar handling into the canonical render/target owners; remove late method overrides and duplicate producer calls.
 - [x] Keep opaque power/text on exact native sinks where available; otherwise render an explicit unavailable state.
@@ -19,6 +19,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 - [x] Make lifecycle enable/disable result-aware and reentrancy-safe; failed attach/apply never publishes an enabled state, independent features continue loading, and disabled-at-login UnitFrames/CenterBars can acquire their runtime owners later.
 - [x] Route debug/perf/aura/minimap command and General-panel mutations through `Settings:SetTx -> Apply`; remove duplicate direct runtime writes and make `RuntimeSettings` the single owner of logging/perf application.
 - [x] Separate mover geometry preview from persistence: drag/resize hot paths mutate runtime frames only, terminal input creates one validated transaction, and failed/cancelled commits restore the persisted runtime owner.
+- [x] Stage profile import on a detached snapshot and commit through one profile-wide transaction; preserve live root identity/history until every immediate and combat-deferred runtime owner succeeds, and restore the prior profile on any late failure.
 
 ## Required in-game validation
 
@@ -28,6 +29,8 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 - [ ] Toggle debug and perf from both General settings and slash commands; profile, runtime state, and `Undo last` stay identical after success and rollback.
 - [ ] Run `/fgui aura mini|classic`; UnitFrames apply executes through the normal queue and a forced failure restores the prior mode/history.
 - [ ] Show/hide/reset the minimap icon from settings and slash commands; position reset is one undo action and failed `LibDBIcon` apply rolls back hide/position values.
+- [ ] Import a valid profile both in and out of combat; the UI reports queued status until all apply owners finish, old history is removed only after commit, and a forced late failure restores the previous profile while preserving newer edits.
+- [ ] Attempt import while another settings transaction or import is pending; the live profile, runtime state, and undo history remain untouched.
 - [ ] Hold a long mover drag/resize and verify zero SavedVariables writes, zero apply requests, and zero undo entries before the terminal input event.
 - [ ] Resize/scale ActionBars, UnitFrames, CenterBars, Companion PetBar, and ExperienceBar; each terminal action produces one undo entry and one owner apply.
 - [ ] Force mover position/scale/size apply failure; profile, exact undo artifact, and visible frame geometry return to the persisted state.

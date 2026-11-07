@@ -255,6 +255,17 @@ local function RestoreClaimedSections(snapshot)
     return changed
 end
 
+local function RestoreSectionsExact(snapshot)
+    local profile = Profile()
+    if not profile then return false end
+
+    for i = 1, #(snapshot or {}) do
+        local record = snapshot[i]
+        profile[record.name] = record.existed and Copy(record.value) or nil
+    end
+    return true
+end
+
 local function HistoryState(panelKey)
     if not Settings or type(panelKey) ~= "string" or panelKey == "" then return nil end
     local stack = type(Settings._undoPanels) == "table" and Settings._undoPanels[panelKey] or nil
@@ -389,6 +400,32 @@ local function RemoveCapturedHistory(captured)
     end
 end
 
+local function CaptureAllHistory()
+    local names, seen = {}, {}
+    local function Add(panelKey)
+        if type(panelKey) == "string" and panelKey ~= "" and not seen[panelKey] then
+            seen[panelKey] = true
+            names[#names + 1] = panelKey
+        end
+    end
+
+    for panelKey in pairs((Settings and Settings._undoPanels) or {}) do Add(panelKey) end
+    for panelKey in pairs((Settings and Settings._undoPanelBatches) or {}) do Add(panelKey) end
+    table.sort(names)
+
+    local captured = {}
+    for i = 1, #names do
+        captured[#captured + 1] = CaptureHistoryEntries(names[i])
+    end
+    return captured
+end
+
+local function RemoveCapturedHistories(captured)
+    for i = 1, #(captured or {}) do
+        RemoveCapturedHistory(captured[i])
+    end
+end
+
 local function SafeCall(label, fn)
     if type(fn) ~= "function" then return nil end
     local ok, result = pcall(fn)
@@ -421,6 +458,106 @@ local function Gather(keys)
         end
     end
     return out, normalized
+end
+
+function Tx:HasPending()
+    for _, list in pairs(self._byKey or {}) do
+        if type(list) == "table" and #list > 0 then
+            return true
+        end
+    end
+    for _, list in pairs((Settings and Settings._pending) or {}) do
+        if type(list) == "table" and #list > 0 then
+            return true
+        end
+    end
+    for _, batch in pairs((Settings and Settings._undoPanelBatches) or {}) do
+        if type(batch) == "table" and (tonumber(batch.depth) or 0) > 0 then
+            return true
+        end
+    end
+    return false
+end
+
+function Tx:ReplaceProfile(replacement, applyKeys, callbacks)
+    callbacks = type(callbacks) == "table" and callbacks or {}
+    if type(replacement) ~= "table" then
+        return false, "Replacement profile is not a table"
+    end
+    if self:HasPending() then
+        return false, "Settings transactions are still pending"
+    end
+
+    local keys = UniqueStrings(applyKeys)
+    if #keys == 0 then
+        return false, "Profile replacement has no apply owners"
+    end
+
+    local profile = Profile()
+    if not profile then
+        return false, "Live profile is unavailable"
+    end
+
+    local names, seen = {}, {}
+    local function Add(name)
+        if type(name) == "string" and name ~= "" and not seen[name] then
+            seen[name] = true
+            names[#names + 1] = name
+        end
+    end
+    for name in pairs(profile) do Add(name) end
+    for name in pairs(replacement) do
+        if type(name) ~= "string" then
+            return false, "Replacement profile contains an unsupported top-level key"
+        end
+        Add(name)
+    end
+    table.sort(names)
+
+    local snapshot = SnapshotSections(names)
+    if not snapshot then
+        return false, "Profile replacement snapshot failed"
+    end
+    local capturedHistory = CaptureAllHistory()
+    local claimed = false
+
+    local installed, installError = xpcall(function()
+        for i = 1, #names do
+            local name = names[i]
+            profile[name] = Copy(replacement[name])
+        end
+        ClaimSections(snapshot)
+        claimed = true
+    end, function(err)
+        return tostring(err or "unknown profile replacement error")
+    end)
+    if not installed then
+        if claimed then
+            RestoreClaimedSections(snapshot)
+        else
+            RestoreSectionsExact(snapshot)
+        end
+        return false, installError
+    end
+
+    local transaction = {
+        rollback = function()
+            return RestoreClaimedSections(snapshot)
+        end,
+        commit = function()
+            RemoveCapturedHistories(capturedHistory)
+        end,
+        onCommit = callbacks.onCommit,
+        onRollback = callbacks.onRollback,
+    }
+
+    local registerOK, registered = pcall(self.Register, self, keys, transaction)
+    if registerOK and registered == true then
+        return true
+    end
+
+    transaction.rollback()
+    return false, registerOK and "Profile replacement registration failed" or tostring(registered)
 end
 
 function Tx:Register(keys, transaction)

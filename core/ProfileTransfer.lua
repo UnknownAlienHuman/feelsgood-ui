@@ -10,8 +10,7 @@ local DB = ns.DB
 local Schema = ns.Schema or {}
 local U = ns.U
 local Log = ns.Log
-local Settings = ns.Settings
-local Movers = ns.Movers
+local ProfileImport = ns.ProfileImport
 local L = ns.L or function(text) return text end
 
 local PREFIX = "FGUI_PROFILE_V1:"
@@ -196,17 +195,6 @@ local function NormalizeByDefaults(value, defaults, depth)
     return out
 end
 
-local function WipeTable(t)
-    if type(t) ~= "table" then return end
-    if type(_G.wipe) == "function" then
-        _G.wipe(t)
-        return
-    end
-    for k in pairs(t) do
-        t[k] = nil
-    end
-end
-
 local function BuildImportCompatibilityError(state)
     state = (type(state) == "table") and state or {}
     local importedVersion = tostring(state.oldVersion or "?")
@@ -234,7 +222,7 @@ function ProfileTransfer:ExportCurrentProfile()
     return EncodeProfileTable(snapshot)
 end
 
-function ProfileTransfer:ImportToCurrentProfile(text)
+function ProfileTransfer:ImportToCurrentProfile(text, callbacks)
     local decoded, err = DecodeProfileTable(text)
     if not decoded then
         return false, err
@@ -247,79 +235,16 @@ function ProfileTransfer:ImportToCurrentProfile(text)
         return false, BuildImportCompatibilityError(schemaState)
     end
 
-    local prof = DB and DB.GetProfile and DB:GetProfile()
-    if type(prof) ~= "table" then
-        return false, L("Profile is not available.")
-    end
-
     local snapshot = U and U.DeepCopy and U.DeepCopy(decoded) or decoded
     local defaults = DB and DB.defaults and DB.defaults.profile
     if type(defaults) == "table" then
         snapshot = NormalizeByDefaults(snapshot, defaults, 0)
     end
 
-    local backup = U and U.DeepCopy and U.DeepCopy(prof) or nil
-    local function RestoreBackup()
-        if type(backup) == "table" then
-            WipeTable(prof)
-            for k, v in pairs(backup) do
-                prof[k] = v
-            end
-        end
-        if DB and DB.Init then
-            pcall(DB.Init, DB)
-        end
-        if DB and DB.ApplyRuntime then
-            pcall(DB.ApplyRuntime, DB)
-        end
+    if not (ProfileImport and type(ProfileImport.Stage) == "function") then
+        return false, L("Profile import transaction owner is not available.")
     end
-
-    WipeTable(prof)
-    for k, v in pairs(snapshot) do
-        prof[k] = v
-    end
-
-    -- Re-run DB init so the imported current-schema payload is normalized and runtime services refresh.
-    if DB and DB.Init then
-        local okInit = pcall(DB.Init, DB)
-        if not okInit then
-            RestoreBackup()
-            return false, L("Failed to apply imported profile. Previous profile has been restored.")
-        end
-    elseif U and U.MergeDefaults and DB and DB.defaults and DB.defaults.profile then
-        local okFallback = pcall(function()
-            U.MergeDefaults(prof, DB.defaults.profile)
-            if Settings and Settings.NormalizeAll then
-                Settings:NormalizeAll()
-            end
-        end)
-        if not okFallback then
-            RestoreBackup()
-            return false, L("Failed to apply imported profile. Previous profile has been restored.")
-        end
-    end
-    if DB and DB.ApplyRuntime then
-        local okRuntime = pcall(DB.ApplyRuntime, DB)
-        if not okRuntime then
-            RestoreBackup()
-            return false, L("Failed to apply imported profile. Previous profile has been restored.")
-        end
-    end
-    if Movers and Movers.ApplyUnlockFromDB then
-        pcall(Movers.ApplyUnlockFromDB, Movers)
-    end
-
-    if Settings and Settings.InvalidateAllHistory then
-        Settings:InvalidateAllHistory()
-    end
-
-    if ns.Apply and ns.Apply.RequestAll then
-        pcall(ns.Apply.RequestAll, ns.Apply)
-    elseif ns.ApplyAll then
-        pcall(ns.ApplyAll)
-    end
-
-    return true
+    return ProfileImport:Stage(snapshot, callbacks)
 end
 
 local function EnsureWindow()
@@ -351,7 +276,7 @@ local function EnsureWindow()
     hint:SetPoint("TOPLEFT", f, "TOPLEFT", 16, -36)
     hint:SetPoint("RIGHT", f, "RIGHT", -36, 0)
     hint:SetJustifyH("LEFT")
-    hint:SetText(L("Export creates a compressed Base64 string. Import applies immediately to the current profile."))
+    hint:SetText(L("Export creates a compressed Base64 string. Import commits only after every runtime owner validates."))
 
     local scroll = CreateFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", f, "TOPLEFT", 16, -56)
@@ -406,18 +331,51 @@ local function EnsureWindow()
     importBtn:SetPoint("LEFT", exportBtn, "RIGHT", 8, 0)
     importBtn:SetText(L("Import Text"))
     importBtn:SetScript("OnClick", function()
-        local ok, err = ProfileTransfer:ImportToCurrentProfile(f._edit:GetText() or "")
+        if ProfileImport and ProfileImport.IsPending and ProfileImport:IsPending() then
+            f._status:SetText(L("A profile import is already waiting for runtime validation."))
+            f._status:SetTextColor(1, 0.82, 0.20)
+            return
+        end
+
+        importBtn:Disable()
+        f._status:SetText(L("Validating and applying imported profile..."))
+        f._status:SetTextColor(1, 0.82, 0.20)
+
+        local ok, message = ProfileTransfer:ImportToCurrentProfile(f._edit:GetText() or "", {
+            onCommit = function(finalMessage)
+                importBtn:Enable()
+                f._status:SetText(finalMessage or L("Profile imported and applied."))
+                f._status:SetTextColor(0.35, 1, 0.35)
+                if Log and Log.Info then
+                    Log:Info(finalMessage or L("Profile imported and applied."))
+                end
+            end,
+            onRollback = function(finalMessage)
+                importBtn:Enable()
+                f._status:SetText(finalMessage or L("Profile import failed. Previous profile restored."))
+                f._status:SetTextColor(1, 0.25, 0.25)
+                if Log and Log.Warn then
+                    Log:Warn(finalMessage or L("Profile import failed. Previous profile restored."))
+                end
+            end,
+        })
         if not ok then
-            f._status:SetText(err or L("Import failed."))
+            importBtn:Enable()
+            f._status:SetText(message or L("Import failed."))
             f._status:SetTextColor(1, 0.25, 0.25)
             return
         end
-        f._status:SetText(L("Profile imported and applied."))
-        f._status:SetTextColor(0.35, 1, 0.35)
-        if Log and Log.Info then
-            Log:Info(L("Profile imported and applied."))
+
+        if ProfileImport and ProfileImport.IsPending and ProfileImport:IsPending() then
+            f._status:SetText(message or L("Profile import queued; waiting for runtime validation."))
+            f._status:SetTextColor(1, 0.82, 0.20)
+        else
+            importBtn:Enable()
+            f._status:SetText(message or L("Profile imported and applied."))
+            f._status:SetTextColor(0.35, 1, 0.35)
         end
     end)
+    f._importBtn = importBtn
 
     ProfileTransfer._window = f
     return f
@@ -443,8 +401,15 @@ end
 function ProfileTransfer:OpenImportWindow()
     local f = EnsureWindow()
     f._edit:SetText("")
-    f._status:SetText(L("Paste an export string and press Import Text."))
-    f._status:SetTextColor(1, 1, 1)
+    if ProfileImport and ProfileImport.IsPending and ProfileImport:IsPending() then
+        f._status:SetText(L("A profile import is waiting for runtime validation."))
+        f._status:SetTextColor(1, 0.82, 0.20)
+        if f._importBtn then f._importBtn:Disable() end
+    else
+        f._status:SetText(L("Paste an export string and press Import Text."))
+        f._status:SetTextColor(1, 1, 1)
+        if f._importBtn then f._importBtn:Enable() end
+    end
     f._edit:SetFocus()
     f._edit:HighlightText(0, 0)
     f:Show()
