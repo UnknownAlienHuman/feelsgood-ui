@@ -29,8 +29,8 @@ assert(Render, "FeelsGoodUI: CenterBarsRender not loaded")
 Center._inited = false
 
 local function GetSectionTable(section)
-    if DB and DB.GetSection then
-        local value = DB:GetSection(section)
+    if DB and DB.ReadSection then
+        local value = DB:ReadSection(section)
         if type(value) == "table" then
             return value
         end

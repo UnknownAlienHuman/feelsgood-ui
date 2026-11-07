@@ -46,8 +46,8 @@ local function HideKickKey(delay)
 end
 
 local function GetActionBarsCfg()
-    if DB and DB.GetSection then
-        return DB:GetSection("actionbars") or {}
+    if DB and DB.ReadSection then
+        return DB:ReadSection("actionbars") or {}
     end
     return {}
 end

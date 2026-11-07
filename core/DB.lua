@@ -417,7 +417,7 @@ function DB:EnsureSection(section)
     return value
 end
 
-function DB:GetSection(section)
+function DB:ReadSection(section)
     if type(section) ~= "string" or section == "" then
         return nil
     end
@@ -428,21 +428,19 @@ function DB:GetSection(section)
     end
 
     local value = profile[section]
-    if value ~= nil then
+    if type(value) == "table" then
         return value
     end
+    return nil
+end
 
-    local defaults = self.defaults and self.defaults.profile
-    local fallback = defaults and defaults[section] or nil
-    if type(fallback) == "table" then
-        return self:EnsureSection(section)
-    end
-
-    return fallback
+-- Compatibility reader. Persisted section creation belongs to EnsureSection.
+function DB:GetSection(section)
+    return self:ReadSection(section)
 end
 
 function DB:ShouldHideBlizzardActionBars()
-    local actionbars = self:GetSection("actionbars")
+    local actionbars = self:ReadSection("actionbars")
     return not (type(actionbars) == "table" and actionbars.hideBlizzard == false)
 end
 
