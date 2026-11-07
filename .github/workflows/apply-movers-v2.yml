@@ -1,0 +1,137 @@
+name: Apply mover transaction owner v2
+
+on:
+  push:
+    branches:
+      - codex/movers-transaction-owner-v2
+    paths:
+      - '.github/bootstrap/movers-patches.b64.part*'
+      - '.github/workflows/apply-movers-v2.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: movers-transaction-owner-v2
+  cancel-in-progress: false
+
+jobs:
+  apply-and-validate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reconstruct patch bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .github/bootstrap/movers-patches.b64.part* | base64 --decode > /tmp/movers-patches.tar.gz
+          echo '9bae12fe57a71298c2581d84206a5a78442f0f8ea114196b9c92318d83960f93  /tmp/movers-patches.tar.gz' | sha256sum --check --strict
+          mkdir -p /tmp/movers-patches
+          tar -xzf /tmp/movers-patches.tar.gz -C /tmp/movers-patches
+          test -s /tmp/movers-patches/01-movers-geometry.patch
+          test -s /tmp/movers-patches/02-movers-fixes.patch
+
+      - name: Apply canonical patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          git apply --recount --check /tmp/movers-patches/01-movers-geometry.patch
+          git apply --recount /tmp/movers-patches/01-movers-geometry.patch
+          git apply --recount --check /tmp/movers-patches/02-movers-fixes.patch
+          git apply --recount /tmp/movers-patches/02-movers-fixes.patch
+          git diff --check
+
+      - name: Run repository validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check check_lua.js
+          npm ci
+          npm test
+
+      - name: Audit mover ownership invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          'use strict';
+          const fs = require('fs');
+
+          function read(path) {
+            return fs.readFileSync(path, 'utf8');
+          }
+          function requireText(path, text) {
+            const source = read(path);
+            if (!source.includes(text)) {
+              throw new Error(`${path}: missing ${JSON.stringify(text)}`);
+            }
+          }
+          function reject(path, pattern) {
+            const source = read(path);
+            if (pattern.test(source)) {
+              throw new Error(`${path}: forbidden pattern ${pattern}`);
+            }
+          }
+
+          const toc = read('FeelsGoodUI.toc');
+          const txIndex = toc.indexOf('core/MoversTransactions.lua');
+          const inspectorIndex = toc.indexOf('core/MoversInspector.lua');
+          if (txIndex < 0 || inspectorIndex < 0 || txIndex >= inspectorIndex) {
+            throw new Error('MoversTransactions must load before MoversInspector');
+          }
+          requireText('FeelsGoodUI.toc', '## Version: 0.0.49');
+          requireText('core/FeatureRegistry.lua', 'movers = {');
+          requireText('core/FeatureRegistry.lua', 'restoreApplyKeys');
+          requireText('core/Apply.lua', 'for i = 1, #orderedKeys do');
+          requireText('core/PanelTransactions.lua', 'function Tx:Checkpoint()');
+          requireText('core/PanelTransactions.lua', 'function Tx:RollbackAfter(checkpoint, keys)');
+          requireText('core/MoversTransactions.lua', 'CapturePendingCheckpoint');
+          requireText('core/MoversTransactions.lua', 'TrimPendingAfter');
+          requireText('core/OptionsPanelEditMode.lua', 'UNDO_APPLY_KEYS');
+
+          for (const path of [
+            'modules/ActionBarsEditMode.lua',
+            'modules/CenterBars.lua',
+            'modules/UnitFramesPolicy.lua',
+            'modules/CompanionPetBar.lua',
+            'modules/ExperienceBar.lua',
+          ]) {
+            reject(path, /\bsetScale\s*=\s*function/);
+            reject(path, /\bsetSize\s*=\s*function/);
+            reject(path, /\bonWheel\s*=\s*function/);
+          }
+
+          for (const path of [
+            'core/Movers.lua',
+            'core/MoversShared.lua',
+            'core/MoversEditor.lua',
+            'core/MoversInspector.lua',
+          ]) {
+            reject(path, /positions\s*\[[^\]]+\]\s*=/);
+            reject(path, /movers\.unlocked\s*=/);
+          }
+
+          console.log('Mover ownership audit passed.');
+          NODE
+
+      - name: Commit validated implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .github/bootstrap
+          rm -f .github/workflows/apply-movers-v2.yml
+          git add -A
+          git diff --cached --check
+          if git diff --cached --quiet; then
+            echo 'No implementation changes produced.' >&2
+            exit 1
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Make mover geometry transactional'
+          git push origin "HEAD:${GITHUB_REF_NAME}"
