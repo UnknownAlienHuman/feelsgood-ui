@@ -5,7 +5,11 @@ on:
     branches:
       - codex/movers-transaction-owner-v2
     paths:
-      - '.github/bootstrap/exact.patch.gz.b64.part*'
+      - '.github/bootstrap/exact.patch.gz.b64.first*'
+      - '.github/bootstrap/exact.patch.gz.b64.part02'
+      - '.github/bootstrap/exact.patch.gz.b64.part03'
+      - '.github/bootstrap/exact.patch.gz.b64.part04'
+      - '.github/bootstrap/exact.patch.gz.b64.part05'
       - '.github/workflows/apply-movers-v2.yml'
 
 permissions:
@@ -29,7 +33,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat .github/bootstrap/exact.patch.gz.b64.part* | base64 --decode > /tmp/patch.gz
+          cat \
+            .github/bootstrap/exact.patch.gz.b64.first01 \
+            .github/bootstrap/exact.patch.gz.b64.first02 \
+            .github/bootstrap/exact.patch.gz.b64.part02 \
+            .github/bootstrap/exact.patch.gz.b64.part03 \
+            .github/bootstrap/exact.patch.gz.b64.part04 \
+            .github/bootstrap/exact.patch.gz.b64.part05 \
+            | base64 --decode > /tmp/patch.gz
           echo '134bf44aa3e4387e7bcc6062422ca94318813fae4b3c7afb27b93de1c9217ec0  /tmp/patch.gz' | sha256sum --check --strict
           gzip -dc /tmp/patch.gz > /tmp/feelsgood-ui-0.0.49.patch
           echo 'a36c32c0a5e6feac31c9f2895f5a5a5bcfc6a47a9835d77e45be89e16043899d  /tmp/feelsgood-ui-0.0.49.patch' | sha256sum --check --strict
