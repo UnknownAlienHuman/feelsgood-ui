@@ -50,6 +50,82 @@ local function GetActionBarsCfg()
     return {}
 end
 
+local function ReadActionBarToggles()
+    if type(_G.GetActionBarToggles) ~= "function" then
+        return nil
+    end
+
+    local values = { _G.GetActionBarToggles() }
+    if #values < 4 then
+        return nil
+    end
+    return values
+end
+
+local function ApplyActionBarToggles(values, count)
+    if type(values) ~= "table" or type(_G.SetActionBarToggles) ~= "function" then
+        return false
+    end
+
+    count = tonumber(count) or #values
+    if count < 4 then
+        return false
+    end
+
+    local ok = pcall(_G.SetActionBarToggles, unpack(values, 1, count))
+    if not ok then
+        return false
+    end
+
+    if type(_G.MultiActionBar_Update) == "function" then
+        pcall(_G.MultiActionBar_Update)
+    end
+    return true
+end
+
+local function CaptureNativeActionBarToggles(module, values)
+    if type(module) ~= "table" then
+        return false
+    end
+    if type(module._nativeActionBarToggles) == "table" then
+        return true
+    end
+
+    values = values or ReadActionBarToggles()
+    if type(values) ~= "table" then
+        return false
+    end
+
+    local snapshot = {}
+    for i = 1, #values do snapshot[i] = values[i] end
+    module._nativeActionBarToggles = {
+        values = snapshot,
+        count = #snapshot,
+    }
+    return true
+end
+
+local function RestoreNativeActionBarToggles(module)
+    if type(module) ~= "table" then
+        return false
+    end
+
+    local snapshot = module._nativeActionBarToggles
+    if type(snapshot) ~= "table" or type(snapshot.values) ~= "table" then
+        return false
+    end
+    if InCombat() then
+        module._pendingRestore = true
+        return false
+    end
+
+    local restored = ApplyActionBarToggles(snapshot.values, snapshot.count)
+    if restored then
+        module._nativeActionBarToggles = nil
+    end
+    return restored
+end
+
 local function SetMouseEnabledSafe(frame, enabled)
     if not frame or type(frame.EnableMouse) ~= "function" then
         return
@@ -262,11 +338,14 @@ function Shell.RestoreBlizzardArt(module, barsCfg)
         restored = RestoreFrame(name, _G[name]) or restored
     end
 
-    if type(barsCfg) == "table" and Shell.EnsureBlizzardMultiBars then
+    local restoredNativeToggles = false
+    if IsDetached(module) then
+        restoredNativeToggles = RestoreNativeActionBarToggles(module)
+    elseif type(barsCfg) == "table" and Shell.EnsureBlizzardMultiBars then
         Shell.EnsureBlizzardMultiBars(module, barsCfg, false)
     end
 
-    if type(_G.MultiActionBar_Update) == "function" then
+    if not restoredNativeToggles and type(_G.MultiActionBar_Update) == "function" then
         pcall(_G.MultiActionBar_Update)
     end
 
@@ -281,7 +360,7 @@ function Shell.RestoreBlizzardArt(module, barsCfg)
         Shell.QueueManagedPositionsRefresh(module)
     end
 
-    return restored
+    return restored or restoredNativeToggles
 end
 
 function Shell.KickHideBlizzardArt(module)
@@ -326,89 +405,46 @@ function Shell.KickHideBlizzardArt(module)
     end
 end
 
-local function IsUntouchedSideBar(cfg, prefix)
-    if type(cfg) ~= "table" then return false end
-    local buttons = tonumber(cfg.buttons) or 12
-    local rows = tonumber(cfg.rows) or 12
-    local enabled = (cfg.enabled ~= false)
-    local configuredPrefix = (type(cfg.prefix) == "string" and cfg.prefix ~= "") and cfg.prefix or prefix
-    return enabled and buttons == 12 and rows == 12 and configuredPrefix == prefix
-end
-
-function Shell.ImportSideBarStateFromBlizzard(module, barsCfg)
-    if type(module) ~= "table" or module._bar45Imported == true then
-        return
-    end
-    if type(_G.GetActionBarToggles) ~= "function" then
-        return
-    end
-
-    local toggles = { _G.GetActionBarToggles() }
-    if #toggles < 4 then
-        return
-    end
-
-    if IsUntouchedSideBar(barsCfg[4], "MultiBarRightButton") then
-        barsCfg[4].enabled = (toggles[3] == true)
-    end
-    if IsUntouchedSideBar(barsCfg[5], "MultiBarLeftButton") then
-        barsCfg[5].enabled = (toggles[4] == true)
-    end
-
-    module._bar45Imported = true
-end
-
 function Shell.EnsureBlizzardMultiBars(module, barsCfg, hideBlizzardOverride)
-    if InCombat() then return end
-    if type(_G.GetActionBarToggles) ~= "function" or type(_G.SetActionBarToggles) ~= "function" then
-        return
+    if InCombat() then return false end
+
+    local toggles = ReadActionBarToggles()
+    if not toggles or type(_G.SetActionBarToggles) ~= "function" then
+        return false
     end
+    CaptureNativeActionBarToggles(module, toggles)
 
     local function IsBarEnabled(index)
         local cfg = barsCfg[index]
         return type(cfg) ~= "table" or cfg.enabled ~= false
     end
 
-    local toggles = { _G.GetActionBarToggles() }
-    local count = #toggles
     local hideBlizzard = hideBlizzardOverride
     if hideBlizzard == nil then
         hideBlizzard = Shell.ShouldHideBlizzardArt()
     end
-    local desiredBottomLeft = IsBarEnabled(2)
-    local desiredBottomRight = IsBarEnabled(3)
-    local desiredRight = hideBlizzard and false or IsBarEnabled(4)
-    local desiredLeft = hideBlizzard and false or IsBarEnabled(5)
+
+    local desired = {
+        IsBarEnabled(2),
+        IsBarEnabled(3),
+        (not hideBlizzard) and IsBarEnabled(4),
+        (not hideBlizzard) and IsBarEnabled(5),
+    }
     local didChange = false
-
-    if count >= 4 then
-        didChange = toggles[1] ~= desiredBottomLeft
-            or toggles[2] ~= desiredBottomRight
-            or toggles[3] ~= desiredRight
-            or toggles[4] ~= desiredLeft
-
-        toggles[1] = desiredBottomLeft
-        toggles[2] = desiredBottomRight
-        toggles[3] = desiredRight
-        toggles[4] = desiredLeft
-        pcall(_G.SetActionBarToggles, unpack(toggles, 1, count))
-    else
-        didChange = true
-        pcall(_G.SetActionBarToggles,
-            desiredBottomLeft,
-            desiredBottomRight,
-            desiredRight,
-            desiredLeft
-        )
-    end
-
-    if type(_G.MultiActionBar_Update) == "function" then
-        pcall(_G.MultiActionBar_Update)
+    for i = 1, 4 do
+        if toggles[i] ~= desired[i] then
+            toggles[i] = desired[i]
+            didChange = true
+        end
     end
 
     if didChange then
+        if not ApplyActionBarToggles(toggles, #toggles) then
+            return false
+        end
         Shell.QueueManagedPositionsRefresh(module)
     end
+    return true
 end
 
 function Shell.EnsureEndCapsHook(module)
