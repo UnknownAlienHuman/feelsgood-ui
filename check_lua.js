@@ -144,6 +144,7 @@ try {
     assertSourceIncludes('core/PanelTransactions.lua', 'function Tx:RollbackAfter(checkpoint, keys)');
     assertSourceIncludes('core/MoversTransactions.lua', 'function Transactions:CommitWrites');
     assertSourceIncludes('core/MoversTransactions.lua', 'CaptureWriteSnapshots');
+    assertSourceIncludes('core/MoversTransactions.lua', 'RestorePreview(spec.applyKeys)');
 
     for (const name of [
         'modules/ActionBarsEditMode.lua',

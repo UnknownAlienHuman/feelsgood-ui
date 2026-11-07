@@ -370,9 +370,11 @@ function Transactions:Preview(spec, frame, operation, ...)
             return preview(frame, firstArg, secondArg)
         end, ErrorHandler)
         if not ok then
+            RestorePreview(spec.applyKeys)
             return false, first
         end
         if first == false then
+            RestorePreview(spec.applyKeys)
             return false, second or ("Mover " .. operation .. " preview returned false")
         end
         return true, first, second
@@ -422,10 +424,11 @@ function Transactions:CommitWrites(applyKeys, writes, panelKey)
     local okSnapshots, writeSnapshots = xpcall(function()
         return CaptureWriteSnapshots(writes)
     end, ErrorHandler)
-    if not okSnapshots then
+    if not okSnapshots or type(writeSnapshots) ~= "table" then
+        local detail = okSnapshots and "Mover transaction snapshot unavailable" or writeSnapshots
         RestorePreview(applyKeys)
-        LogError("Mover transaction snapshot failed: " .. tostring(writeSnapshots))
-        return false, writeSnapshots
+        LogError("Mover transaction snapshot failed: " .. tostring(detail))
+        return false, detail
     end
 
     local journal = ns.PanelTransactions
