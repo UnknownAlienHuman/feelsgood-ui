@@ -7,6 +7,7 @@ on:
     paths:
       - '.github/workflows/harden-generic-state-registries.yml'
       - '.codex/run_harden_generic_state_registries.py'
+      - '.codex/fix_generic_state_registry_fixtures.py'
 
 permissions:
   contents: write
@@ -27,6 +28,7 @@ jobs:
         run: |
           set -euo pipefail
           python .codex/run_harden_generic_state_registries.py
+          python .codex/fix_generic_state_registry_fixtures.py
           git diff --check
 
       - name: Audit generic ownership
@@ -40,6 +42,7 @@ jobs:
           minimap = Path('core/MinimapIcon.lua').read_text()
           utils = Path('core/Utils.lua').read_text()
           check = Path('check_lua.js').read_text()
+          fixture = Path('.codex/test_animate_registries.lua').read_text()
 
           required_animate = [
               'Animate._frameRegistry',
@@ -48,6 +51,8 @@ jobs:
               'TimerRegistry[host]',
               'state[key .. "FinalAlpha"]',
               'state[key .. "HideOnFinished"]',
+              'local state = GetFrameState(frame, true)',
+              'local state = GetFrameState(frame, false)',
           ]
           for needle in required_animate:
               assert needle in animate, f'missing Animate registry contract: {needle}'
@@ -76,6 +81,8 @@ jobs:
           assert 'function U.GetCooldownTimerText' not in utils
           assert 'generic animation owner metadata' in check
           assert 'LibDBIcon button metadata' in check
+          assert 'Animate.CancelFade(frame, 0.55)' in fixture
+          assert 'zero-delay callback token cancelled' in fixture
           print('Generic state ownership audit passed.')
           PY
 
