@@ -138,6 +138,25 @@ try {
         }
     }
 
+    assertSourceIncludes('modules/CompanionPetState.lua', 'function State:BeginButton');
+    assertSourceIncludes('modules/CompanionPetState.lua', 'function State:FinishButton');
+    assertSourceIncludes('modules/CompanionPetState.lua', 'function State:SuppressNativeBar');
+    assertSourceIncludes('modules/CompanionPetState.lua', 'function State:RestoreAll');
+    assertSourceIncludes('modules/CompanionPetState.lua', 'pcall(record.release, record.button)');
+    assertSourceIncludes('modules/CompanionPetState.lua', 'ValidateCapturedComponents');
+    assertSourceIncludes('modules/CompanionPetState.lua', 'ComponentsMatch');
+    assertSourceIncludes('modules/CompanionPetState.lua', 'local structuralOwned = parentKnown');
+    assertSourceIncludes('modules/CompanionPetState.lua', 'if currentShown == managed.shown then');
+    assertSourceIncludes('modules/CompanionPetBar.lua', 'release = ReleasePetButtonStyle');
+    assertSourceIncludes('modules/CompanionPetBar.lua', 'PetState:BeginButton');
+    assertSourceIncludes('modules/CompanionPetBar.lua', 'local pending = {}');
+    assertSourceIncludes('modules/CompanionPetBar.lua', 'Managed pet action button preview capture failed');
+    assertSourceIncludes('modules/CompanionPetBar.lua', 'PetState:FinishButton');
+    assertSourceIncludes('modules/CompanionPetBar.lua', 'PetState:RestoreAll(module)');
+    assertSourceExcludes('modules/CompanionPetBar.lua', /RestoreTextureAlpha/, 'default-value pet texture restore');
+    assertSourceExcludes('modules/CompanionPetBar.lua', /ResetPetButtonParent/, 'guessed pet-button parent restore');
+    assertSourceExcludes('modules/CompanionPetBar.lua', /pcall\(_G\.PetActionBar\.SetAlpha/, 'direct native pet-bar alpha takeover');
+
     assertSourceIncludes('modules/CompanionMicroBags.lua', 'module._microSourceHooks');
     assertSourceIncludes('modules/CompanionMicroBags.lua', 'module._bagTextureHooks');
     assertSourceIncludes('modules/CompanionMicroBags.lua', 'module._bagCountTextByButton');
@@ -199,6 +218,7 @@ try {
     assertBefore(tocEntries, 'modules/UnitFramesRender.lua', 'modules/UnitFramesPolicy.lua');
     assertBefore(tocEntries, 'modules/CenterBarsRuntime.lua', 'modules/CenterBarsRender.lua');
     assertBefore(tocEntries, 'modules/CenterBarsRender.lua', 'modules/CenterBars.lua');
+    assertBefore(tocEntries, 'modules/CompanionPetState.lua', 'modules/CompanionPetBar.lua');
 
     assertSourceIncludes('core/FeatureRegistry.lua', 'movers = {');
     assertSourceIncludes('core/PanelTransactions.lua', 'function Tx:RollbackAfter(checkpoint, keys)');
