@@ -28,7 +28,6 @@ DB.defaults = {
         minimap = {
             hide = false,
             minimapPos = 220, -- degrees around minimap center
-            radius = 80,
         },
 
         -- Media can be either a file path OR a LibSharedMedia key.

@@ -131,6 +131,15 @@ try {
         }
     }
 
+    assertSourceIncludes('core/MinimapIcon.lua', 'local runtimeCfg = {}');
+    assertSourceIncludes('core/MinimapIcon.lua', 'EnsureDragHooks');
+    assertSourceIncludes('core/MinimapIcon.lua', 'CommitDraggedPosition');
+    assertSourceIncludes('core/MinimapIcon.lua', 'LDBIcon:Register(addonName, obj, runtimeCfg)');
+    assertSourceExcludes('core/MinimapIcon.lua', /LDBIcon:Register\(addonName,\s*obj,\s*cfg\)/, 'live minimap profile registration');
+    assertSourceExcludes('core/MinimapIcon.lua', /LDBIcon:Refresh\(addonName,\s*cfg\)/, 'live minimap profile refresh');
+    assertSourceExcludes('core/DB.lua', /minimapPos:\s*220[\s\S]{0,120}radius\s*=/, 'dead minimap radius default');
+    assertSourceExcludes('core/Settings.lua', /mm\.radius\s*=\s*ValidateNumber/, 'dead minimap radius normalization');
+
     assertSourceIncludes('core/DB.lua', 'function DB:ReadSection(section)');
     assertSourceIncludes('core/DB.lua', 'return self:ReadSection(section)');
     assertSourceExcludes('core/DB.lua', /function DB:GetSection[\s\S]*?EnsureSection/, 'write-on-read DB compatibility path');

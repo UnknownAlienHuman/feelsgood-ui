@@ -10,6 +10,7 @@
 | `core/MoversTransactions.lua` | Pure mover write builders, runtime-only position/geometry preview, one-shot Settings commits, and preview restoration after failure/cancel. |
 | `core/PanelTransactions.lua` | Ordered `SetTx`/undo/reset/profile-replacement journal, ownership-aware rollback, multi-key commit tracking, history repair, and terminal callbacks. |
 | `core/ProfileImport.lua`, `core/ProfileTransfer.lua` | Bounded decode/export UI, detached normalization, profile-wide atomic commit/rollback, and durable recovery for interrupted imports. |
+| `core/MinimapIcon.lua` | LibDBIcon runtime proxy, terminal drag-position transaction, visibility apply owner, and rollback reconciliation. |
 | `core/Options*.lua`, `core/Movers*.lua`, `core/Commands.lua` | Settings pages, frame editing/movement UI, and command adapters over Settings/Apply. |
 | `core/FeatureRegistry.lua` | Feature definitions and apply order. |
 | `modules/UnitFramesPolicy.lua` | Read-only UnitFrames configuration/cache policy, immutable fallbacks, and transactional mover write builders. |

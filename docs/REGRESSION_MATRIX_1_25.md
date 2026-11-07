@@ -49,7 +49,7 @@ Execution rule: every run records the exact client build, addon revision, result
 | 21 | Disable/re-enable action bars and reload after setting a distinctive native multi-bar toggle vector | Exact pre-attach Blizzard toggles and shell state restore after reload or detach; recovery marker clears after restore; addon profile bars do not change; no detached delayed callback re-enters |  |  |
 | 22 | Companion micro menu, bags, and pet bar lifecycle | Controls attach, update, restore, and detach without duplicate ownership |  |  |
 | 23 | Experience/reputation/honor states | Correct bar is shown; capped/unsupported states hide cleanly |  |  |
-| 24 | Theme/media/minimap icon/profile switch | Fonts, textures, colors, icon actions, and profile refresh remain coherent |  |  |
+| 24 | Theme/media/minimap icon/profile switch; drag icon and force one minimap apply failure | Fonts/textures/colors remain coherent; drag preview writes only the proxy, mouse-up commits once, no-op drag creates no transaction, and failure restores the persisted position |  |  |
 | 25 | Full combat smoke with taint logging enabled | No `ADDON_ACTION_BLOCKED`, `ADDON_ACTION_FORBIDDEN`, or repeating errors |  |  |
 | 26 | Inject one feature attach/apply failure while other families are valid | Failed feature cleans up and remains disabled; later families still enable; exact owner/error is reported |  |  |
 | 27 | Delete one core/feature section after DB initialization, then exercise all runtime readers and settings pages | No read path recreates SavedVariables data; explicit `EnsureSection`/Settings normalization repairs the section once |  |  |
