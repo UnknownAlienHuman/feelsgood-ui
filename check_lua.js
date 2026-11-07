@@ -131,6 +131,14 @@ try {
         }
     }
 
+    assertSourceIncludes('modules/ExperienceBar.lua', 'SuppressBlizzardStatusTracking');
+    assertSourceIncludes('modules/ExperienceBar.lua', 'module._statusTrackingSnapshot');
+    assertSourceIncludes('modules/ExperienceBar.lua', 'MaintainStatusTrackingOwnership');
+    assertSourceExcludes('modules/ExperienceBar.lua', /pcall\(frame\.Hide,\s*frame\)/, 'native status-frame Hide takeover');
+    assertSourceExcludes('modules/ExperienceBar.lua', /function\s+XP:Enable\(/, 'parallel ExperienceBar lifecycle enable owner');
+    assertSourceExcludes('modules/ExperienceBar.lua', /function\s+XP:Disable\(/, 'parallel ExperienceBar lifecycle disable owner');
+    assertSourceExcludes('modules/ExperienceBar.lua', /pcall\(manager\.Show/, 'unconditional Blizzard status manager Show');
+
     assertSourceIncludes('core/MinimapIcon.lua', 'local runtimeCfg = {}');
     assertSourceIncludes('core/MinimapIcon.lua', 'EnsureDragHooks');
     assertSourceIncludes('core/MinimapIcon.lua', 'CommitDraggedPosition');
