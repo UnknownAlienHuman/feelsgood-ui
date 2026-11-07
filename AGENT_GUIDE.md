@@ -8,9 +8,9 @@ The executable entry points are `core/Bootstrap.lua:ns` and `core/Events.lua:OnE
 
 ## Runtime map
 
-- `core/DB.lua:DB:Init` creates/migrates `FeelsGoodUIDB`, profiles, and sections. `core/Settings.lua` is the intended settings-write API; `core/Apply.lua` batches dirty apply keys, restores failed transactions, and defers combat-sensitive keys until `Apply:OnCombatEnd`. `core/PanelTransactions.lua` journals scalar writes plus panel undo/reset. `core/RuntimeSettings.lua` owns logging/performance presentation; `core/MoversTransactions.lua` owns mover preview-to-commit transitions and composes position plus feature geometry into one terminal transaction.
+- `core/DB.lua:DB:Init` creates/migrates `FeelsGoodUIDB`, profiles, and sections. `core/Settings.lua` is the intended settings-write API; `core/Apply.lua` batches dirty apply keys, restores failed transactions, and defers combat-sensitive keys until `Apply:OnCombatEnd`. `core/PanelTransactions.lua` journals scalar writes, panel undo/reset, and profile-wide replacement. `core/RuntimeSettings.lua` owns logging/performance presentation; `core/MoversTransactions.lua` owns mover preview-to-commit transitions; `core/ProfileImport.lua` owns detached normalization, terminal import commit/rollback, and interrupted-import recovery.
 - `core/FeatureRegistry.lua` is the contract table: feature order, apply order, panel order, module contracts, and theme consumers. `core/Lifecycle.lua:RegisterModule/Enable/Disable/EnableAll` supplies guarded module state and result-aware transitions.
-- `core/App.lua:RegisterFeatureModules`, `EnableFeatureModules`, `RunStartupServices`, and `ApplyTheme` connect registry contracts to modules. `core/Events.lua` routes `ADDON_LOADED`, `PLAYER_LOGIN`, combat transitions, and blocked/forbidden action diagnostics.
+- `core/App.lua:RegisterFeatureModules`, `EnableFeatureModules`, `RunStartupServices`, and `ApplyTheme` connect registry contracts to modules. Interrupted profile-import recovery runs before `DB.Init`; `core/Events.lua` routes `ADDON_LOADED`, `PLAYER_LOGIN`, combat transitions, and blocked/forbidden action diagnostics.
 - Unit frames: `modules/UnitFrames.lua` configures `UnitFramesPolicy`, `UnitFramesRender`, `UnitFramesRuntime`, `UnitFramesTarget`, and `UnitFramesText`, using external `oUF` frames. `UnitFramesRuntime`/`UnitFramesTarget` attach event observers for target/name/faction/level/auras.
 - Action bars: `modules/ActionBars.lua` owns secure holders and delegates state, visual, Blizzard shell, Edit Mode, and runtime updates to the `ActionBars*` files. This is the most protected/taint-sensitive family.
 - Center bars: `CenterBars.lua` delegates render/runtime and listens to player power/rune/world/spec events. Companion and ExperienceBar are independent feature families registered through the same lifecycle.
@@ -19,7 +19,7 @@ The executable entry points are `core/Bootstrap.lua:ns` and `core/Events.lua:OnE
 
 ## State and dependencies
 
-`FeelsGoodUIDB` contains profile data, normalized feature sections, typography/media, mover positions, action-bar/unit-frame/center-bar/companion settings, and profile-transfer state. Runtime module state, caches, pending apply keys, undo journals, and observers are transient. Do not write directly to the global DB from a module or command; route persisted changes through `ns.Settings:Set/SetTx` and runtime effects through `ns.Apply:Request`.
+`FeelsGoodUIDB` contains profile data, normalized feature sections, typography/media, mover positions, action-bar/unit-frame/center-bar/companion settings, and profile-transfer state. Runtime module state, caches, pending apply keys, undo journals, and observers are transient. While an import is waiting for terminal apply, the root may contain temporary `_profileImportRecovery` data with the previous and expected profiles; it must be removed on commit/rollback or consumed before `DB.Init` after an interrupted session. Do not write directly to the global DB from a module or command; route persisted changes through `ns.Settings:Set/SetTx` and runtime effects through `ns.Apply:Request`.
 
 `oUF` is required and external. The five support libraries are vendored in `libs/`; LibSharedMedia is used by `core/Media.lua`. `libs/LibDBIcon-1.0/lib.xml` is an inactive packaging descriptor in this snapshot because the root TOC loads `LibDBIcon-1.0.lua` directly. No in-house addon is a TOC dependency. The code may observe Blizzard UI and Edit Mode but must not assume those frames are loaded before the relevant `ADDON_LOADED`/login path.
 
@@ -27,6 +27,7 @@ The executable entry points are `core/Bootstrap.lua:ns` and `core/Events.lua:OnE
 
 - Add or migrate a setting: `core/DB.lua` defaults/migration, `core/Settings.lua` validation/normalization, then the relevant options panel; use `Settings:SetTx` and `Apply:Request`. Add an apply key to `core/FeatureRegistry.lua` only when a distinct runtime owner is required.
 - Change general debug/performance runtime state: route through `core/RuntimeSettings.lua`; `Perf:SetEnabled` is runtime-only and must not persist configuration.
+- Change profile import/export: keep decode/bounds/schema compatibility in `core/ProfileTransfer.lua`; keep detached normalization, full apply-order transaction ownership, terminal callbacks, and durable recovery in `core/ProfileImport.lua`. Never call individual runtime owners or invalidate history directly from the UI adapter.
 - Add a feature/module: define its contract in `core/FeatureRegistry.lua`, register it through `core/App.lua`, implement lifecycle methods in the module family, and preserve `Lifecycle` error/disable semantics.
 - Change apply order or combat deferral: `core/FeatureRegistry.lua` apply order plus `core/Apply.lua`; do not patch a module to bypass the queue.
 - Unit frame behavior: route layout/text/target/aura changes to `modules/UnitFrames*.lua`; keep `modules/UnitFrames.lua` as facade/configuration.
@@ -39,6 +40,7 @@ The executable entry points are `core/Bootstrap.lua:ns` and `core/Events.lua:OnE
 - Secure action-bar holders, state drivers, Edit Mode, `SetAttribute`, and Blizzard shell visibility are protected boundaries. Defer mutations in combat and validate `ADDON_ACTION_BLOCKED`, `ADDON_ACTION_FORBIDDEN`, and `MACRO_ACTION_FORBIDDEN` reports.
 - Unit-frame/center-bar runtime handlers are event-driven hot paths. Preserve caches and narrow unit filters; avoid per-event allocations and unsafe arithmetic/comparisons on secret values (`core/Secret.lua`, `modules/UnitFramesText.lua`).
 - Settings transaction rollback and apply-key ordering are correctness invariants: profile state, undo history, and runtime state must commit together or restore together. A mover resize that changes both feature geometry and anchor position is one multi-owner transaction, not independent writes.
+- Profile import is not successful until every immediate and combat-deferred apply owner commits. `/reload`, logout, or termination while pending must recover the previous profile before DB initialization and overlay only changes made after the import began.
 - User-facing adapters must not update runtime optimistically after a profile write; the apply owner performs the runtime transition and reports failure back to the journal.
 - `core/Bootstrap.lua` temporarily exposes a debug global; keep it removable through `HideDebugGlobal`.
 
@@ -48,11 +50,11 @@ Static checks:
 
 ```powershell
 Get-Content _Addons/FeelsGoodUI/FeelsGoodUI.toc
-rg -n "RequiredDeps|FeelsGoodUIDB|RuntimeSettings|MoversTransactions|SetTx|Apply:Request|RegisterModule|Apply:OnCombatEnd|ADDON_ACTION_BLOCKED|SecureHandler|oUF" _Addons/FeelsGoodUI
+rg -n "RequiredDeps|FeelsGoodUIDB|ProfileImport|_profileImportRecovery|RuntimeSettings|MoversTransactions|SetTx|Apply:Request|RegisterModule|Apply:OnCombatEnd|ADDON_ACTION_BLOCKED|SecureHandler|oUF" _Addons/FeelsGoodUI
 ```
 
-In-game: test with and without `oUF`; reload/login; enable/disable every feature family; edit movers and reload; profile export/import/reset; Edit Mode and action-bar visibility; target/party/raid unit changes; resource/spec changes; enter/leave combat; `/fgui` command help and recent errors. Check command/UI parity for debug, perf, aura mode, and minimap state. Check the existing regression matrix in `docs/REGRESSION_MATRIX_1_25.md` and inspect BugGrabber for protected-action errors.
+In-game: test with and without `oUF`; reload/login; enable/disable every feature family; edit movers and reload; profile export/import/reset; import during combat and force a late owner failure; reload or log out while an import is pending and confirm recovery; Edit Mode and action-bar visibility; target/party/raid unit changes; resource/spec changes; enter/leave combat; `/fgui` command help and recent errors. Check command/UI parity for debug, perf, aura mode, and minimap state. Check the existing regression matrix in `docs/REGRESSION_MATRIX_1_25.md` and inspect BugGrabber for protected-action errors.
 
 ## Unknowns
 
-Static evidence does not prove compatibility with every `oUF` revision or current Blizzard secure/Edit Mode implementation. Treat frame names, secret-value behavior, settings panel timing, and LibDBIcon drag persistence as target-client verification items.
+Static evidence does not prove compatibility with every `oUF` revision, current Blizzard secure/Edit Mode implementation, or actual SavedVariables write timing. Treat frame names, secret-value behavior, settings panel timing, LibDBIcon drag persistence, and interrupted-import recovery in the target client as runtime verification items.

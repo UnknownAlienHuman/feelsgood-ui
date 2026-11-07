@@ -286,6 +286,15 @@ end
 function App:RunStartupServices()
     local services = {
         {
+            label = "ProfileImport.RecoverInterrupted",
+            run = function()
+                local recovery = ns.ProfileImport
+                if recovery and type(recovery.RecoverInterrupted) == "function" then
+                    recovery:RecoverInterrupted(_G.FeelsGoodUIDB)
+                end
+            end,
+        },
+        {
             label = "DB.Init",
             run = function()
                 CallMethod(ns.DB, "Init")

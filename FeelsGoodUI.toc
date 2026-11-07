@@ -2,7 +2,7 @@
 ## Title: FeelsGoodUI
 ## Notes: Minimalist oUF-based unitframes + custom secure action bars.
 ## Author: Neomorph
-## Version: 0.0.49
+## Version: 0.0.50
 ## SavedVariables: FeelsGoodUIDB
 ## RequiredDeps: oUF
 
@@ -45,6 +45,7 @@ core/MinimapIcon.lua
 core/OptionsShared.lua
 core/OptionsSharedHelpers.lua
 core/PanelTransactions.lua
+core/ProfileImport.lua
 core/OptionsFieldBuilders.lua
 core/Options.lua
 core/OptionsPanelGeneral.lua

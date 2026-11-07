@@ -134,7 +134,9 @@ try {
     assertBefore(tocEntries, 'core/RuntimeSettings.lua', 'core/MoversTransactions.lua');
     assertBefore(tocEntries, 'core/MoversTransactions.lua', 'core/MoversShared.lua');
     assertBefore(tocEntries, 'core/OptionsSharedHelpers.lua', 'core/PanelTransactions.lua');
-    assertBefore(tocEntries, 'core/PanelTransactions.lua', 'core/OptionsFieldBuilders.lua');
+    assertBefore(tocEntries, 'core/PanelTransactions.lua', 'core/ProfileImport.lua');
+    assertBefore(tocEntries, 'core/ProfileImport.lua', 'core/OptionsFieldBuilders.lua');
+    assertBefore(tocEntries, 'core/ProfileImport.lua', 'core/ProfileTransfer.lua');
     assertBefore(tocEntries, 'modules/UnitFramesTarget.lua', 'modules/UnitFramesRender.lua');
     assertBefore(tocEntries, 'modules/UnitFramesRender.lua', 'modules/UnitFramesPolicy.lua');
     assertBefore(tocEntries, 'modules/CenterBarsRuntime.lua', 'modules/CenterBarsRender.lua');
