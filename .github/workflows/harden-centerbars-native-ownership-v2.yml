@@ -1,0 +1,74 @@
+name: Harden CenterBars native ownership edges
+
+on:
+  push:
+    branches:
+      - codex/centerbars-native-ownership
+    paths:
+      - '.github/workflows/harden-centerbars-native-ownership-v2.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Apply edge hardening
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .codex/harden_centerbars_native_ownership_v2.py
+          git diff --check
+
+      - name: Audit reversible adoption
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path('modules/CenterBarsRender.lua').read_text()
+          check = Path('check_lua.js').read_text()
+          assert 'ApplyClassResourceSuppression(record)' in source
+          assert 'elseif registry[name] then' in source
+          assert 'type(record.alpha) ~= "number" and type(record.mouseEnabled) ~= "boolean"' in source
+          assert 'ApplyClassResourceSuppression(record)' in check
+          print('CenterBars reversible-adoption audit passed.')
+          PY
+
+      - name: Run Lua edge harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v lua5.1 >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y lua5.1
+          fi
+          lua5.1 .codex/test_centerbars_native_ownership_v2.lua
+
+      - name: Validate addon
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm test
+
+      - name: Commit validated result
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .codex
+          rm -f .github/workflows/harden-centerbars-native-ownership-v2.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Require reversible CenterBars native adoption" -m "Restore stale records when a named Blizzard frame disappears, adopt only properties whose original values can be read, and avoid mutating unreadable foreign frame state."
+          git push origin HEAD:codex/centerbars-native-ownership
