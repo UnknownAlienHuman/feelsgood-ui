@@ -1,7 +1,7 @@
 from pathlib import Path
 
-path = Path('.codex/test_actionbars_state_registry.lua')
-text = path.read_text(encoding='utf-8')
+state_path = Path('.codex/test_actionbars_state_registry.lua')
+state = state_path.read_text(encoding='utf-8')
 old = '''-- Permanent hover hooks resolve the current owner/layer from the registry.
 record.layers.highlight:Hide()
 button.hooks.OnEnter[1](button)
@@ -32,8 +32,26 @@ FireHooks("OnEnter")
 assertEqual(record.layers.highlight.shown, false, "detached highlight hook inert")
 module._detached = nil
 '''
-count = text.count(old)
+count = state.count(old)
 if count != 1:
     raise RuntimeError(f'hook-order fixture anchor: expected 1, found {count}')
-path.write_text(text.replace(old, new, 1), encoding='utf-8')
-print('Fixed ActionBars hook-order fixture.')
+state_path.write_text(state.replace(old, new, 1), encoding='utf-8')
+
+visual_path = Path('.codex/test_actionbars_visual_registry.lua')
+visual = visual_path.read_text(encoding='utf-8')
+replacements = {
+    '        ApplyFont = function(region, font, size, outline)\n':
+        '        ApplyFont = function(_, region, font, size, outline)\n',
+    '        ApplyIconCrop = function(region)\n':
+        '        ApplyIconCrop = function(_, region)\n',
+}
+for old_text, new_text in replacements.items():
+    count = visual.count(old_text)
+    if count != 1:
+        raise RuntimeError(
+            f'visual colon-method fixture anchor {old_text.strip()!r}: expected 1, found {count}'
+        )
+    visual = visual.replace(old_text, new_text, 1)
+visual_path.write_text(visual, encoding='utf-8')
+
+print('Fixed ActionBars registry fixtures.')
