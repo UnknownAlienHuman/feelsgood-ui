@@ -150,6 +150,8 @@ try {
     assertSourceIncludes('modules/ActionBarsBlizzardShell.lua', 'CaptureNativeActionBarToggles');
     assertSourceIncludes('modules/ActionBarsBlizzardShell.lua', 'RestoreNativeActionBarToggles');
     assertSourceIncludes('modules/ActionBarsBlizzardShell.lua', 'NATIVE_TOGGLE_RECOVERY_KEY');
+    assertSourceIncludes('modules/ActionBarsBlizzardShell.lua', 'RestorePersistedNativeActionBarToggles');
+    assertSourceIncludes('core/App.lua', 'ActionBars.RestorePersistedNativeState');
     assertSourceExcludes('modules/ActionBarsBlizzardShell.lua', /ImportSideBarStateFromBlizzard/, 'implicit Blizzard-to-profile sidebar import');
     assertSourceExcludes('modules/ActionBarsBlizzardShell.lua', /barsCfg\s*\[\s*[45]\s*\]\.enabled\s*=/, 'direct sidebar profile mutation');
     assertSourceExcludes('modules/ActionBarsRuntime.lua', /ab\.autoHide\s*=(?!=)/, 'runtime action-bar profile normalization');

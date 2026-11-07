@@ -200,7 +200,10 @@ local function RestoreNativeActionBarToggles(module)
 
     local snapshot = module._nativeActionBarToggles
     if type(snapshot) ~= "table" or type(snapshot.values) ~= "table" then
-        return false
+        local values, count = ReadPersistedNativeActionBarToggles()
+        if not values then return false end
+        snapshot = { values = values, count = count }
+        module._nativeActionBarToggles = snapshot
     end
     if InCombat() then
         module._pendingRestore = true
@@ -210,6 +213,19 @@ local function RestoreNativeActionBarToggles(module)
     local restored = ApplyActionBarToggles(snapshot.values, snapshot.count)
     if restored then
         module._nativeActionBarToggles = nil
+        ClearPersistedNativeActionBarToggles()
+    end
+    return restored
+end
+
+function Shell.RestorePersistedNativeActionBarToggles()
+    if InCombat() then return false end
+
+    local values, count = ReadPersistedNativeActionBarToggles()
+    if not values then return false end
+
+    local restored = ApplyActionBarToggles(values, count)
+    if restored then
         ClearPersistedNativeActionBarToggles()
     end
     return restored
