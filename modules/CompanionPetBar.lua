@@ -344,14 +344,14 @@ local function RefreshBlizzardPetBar()
 end
 
 function PetBar:Apply(module, cp, profile)
-    if not (module and cp) then return end
+    if not (module and cp) then return false, "Companion pet-bar apply owner unavailable" end
     if Shared:IsInCombat() then
         module._pendingAfterCombat = true
-        return
+        return false, "Companion pet-bar apply deferred in combat"
     end
 
     local holder = EnsurePetAnchor(module)
-    if not holder then return end
+    if not holder then return false, "Companion pet-bar holder unavailable" end
 
     holder:Show()
     Shared:ApplyFrameLayer(holder, cp.petBar.strata, cp.petBar.level)
@@ -381,7 +381,9 @@ function PetBar:Apply(module, cp, profile)
 
     if not allReady then
         module._pendingAfterCombat = true
+        return false, "Pet action buttons unavailable"
     end
+    return true
 end
 
 function PetBar:RestoreDefaultLayout(module)

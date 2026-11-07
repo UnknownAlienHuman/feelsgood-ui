@@ -19,6 +19,7 @@
 | `modules/ActionBarsBlizzardShell.lua` | Reversible Blizzard shell/native-toggle takeover, per-character recovery across reload/interruption, exact detach restore, and managed-position synchronization. |
 | `modules/ActionBars.lua`, `modules/ActionBarsRuntime.lua`, `modules/ActionBarsState.lua`, `modules/ActionBarsVisuals.lua`, `modules/ActionBarsEditMode.lua` | Secure holders, event/lifecycle coordination, state, visuals, and mover integration without direct profile mutation. |
 | `modules/CenterBars*.lua` | Center-resource rendering/runtime plus reversible, conflict-aware Blizzard class-resource alpha/mouse ownership. |
-| `modules/Companion*.lua` | Companion pet-bar, micro-menu, bags, and lifecycle ownership. |
+| `modules/CompanionRuntime.lua` | Result-bearing Companion lifecycle/apply coordinator and partial-layer cleanup. |
+| `modules/CompanionMicroBags.lua`, `modules/CompanionPetBar.lua`, `modules/CompanionShared.lua` | Owner-local hook/cache state plus pet-bar, micro-menu, and bag presentation layers. |
 | `modules/ExperienceBar.lua` | XP/reputation/honor presentation, single lifecycle apply owner, and reversible Blizzard status-tracking alpha/mouse suppression. |
 | `docs/` | Plans, archived work, architecture ledger, and regression material. |

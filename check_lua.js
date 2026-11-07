@@ -131,8 +131,19 @@ try {
             if (/__fguiBorder(?:Size)?/.test(source)) {
                 errors.push(`${name}: border ownership must stay in Media's registry, not on target frames`);
             }
+            if (name === 'modules/CompanionMicroBags.lua'
+                && /_(?:fguiCompanionHooked|fguiSquareSkinHooked|fguiBagCountText|fguiBagSummary)\b/.test(source)) {
+                errors.push(`${name}: Companion runtime metadata must stay on the owner, not Blizzard frames`);
+            }
         }
     }
+
+    assertSourceIncludes('modules/CompanionMicroBags.lua', 'module._microSourceHooks');
+    assertSourceIncludes('modules/CompanionMicroBags.lua', 'module._bagTextureHooks');
+    assertSourceIncludes('modules/CompanionMicroBags.lua', 'module._bagCountTextByButton');
+    assertSourceIncludes('modules/CompanionRuntime.lua', 'local petApplied, petDetail');
+    assertSourceIncludes('modules/CompanionRuntime.lua', 'local microApplied, microDetail');
+    assertSourceIncludes('modules/CompanionPetBar.lua', 'return false, "Pet action buttons unavailable"');
 
     assertSourceIncludes('core/Media.lua', 'Media._borderRegistry');
     assertSourceIncludes('core/Media.lua', 'function Media:GetBorder(frame)');
