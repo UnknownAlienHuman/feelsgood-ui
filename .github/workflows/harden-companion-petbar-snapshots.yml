@@ -1,0 +1,107 @@
+name: Harden Companion pet-button snapshots
+
+on:
+  push:
+    branches:
+      - codex/companion-petbar-snapshots
+    paths:
+      - '.github/workflows/harden-companion-petbar-snapshots.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Integrate pet-state owner
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .codex/integrate_companion_pet_state.py
+          python .codex/run_harden_companion_pet_state.py
+          git diff --check
+
+      - name: Audit snapshot ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          toc = Path('FeelsGoodUI.toc').read_text()
+          state = Path('modules/CompanionPetState.lua').read_text()
+          pet = Path('modules/CompanionPetBar.lua').read_text()
+          check = Path('check_lua.js').read_text()
+
+          assert toc.index('modules/CompanionPetState.lua') < toc.index('modules/CompanionPetBar.lua')
+          required_state = [
+              'function State:BeginButton',
+              'function State:FinishButton',
+              'function State:ReleaseButton',
+              'function State:SuppressNativeBar',
+              'function State:RestoreAll',
+              'ForceRestoreButtonRecord',
+              'and parent == managed.parent',
+              'not NumberEqual(record.managedAlpha, 0)',
+          ]
+          for needle in required_state:
+              assert needle in state, f'missing pet-state contract: {needle}'
+
+          required_pet = [
+              'PetState:SuppressNativeBar',
+              'PetState:BeginButton',
+              'PetState:FinishButton',
+              'PetState:ReleaseButton',
+              'PetState:RestoreAll(module)',
+          ]
+          for needle in required_pet:
+              assert needle in pet, f'missing PetBar integration: {needle}'
+
+          forbidden = [
+              'RestoreTextureAlpha',
+              'ResetPetButtonParent',
+              'pcall(_G.PetActionBar.SetAlpha',
+          ]
+          for needle in forbidden:
+              assert needle not in pet, f'guessed/direct pet restore remains: {needle}'
+
+          assert 'CompanionPetState.lua' in check
+          print('Companion pet-state ownership audit passed.')
+          PY
+
+      - name: Run Lua pet-state harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v lua5.1 >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y lua5.1
+          fi
+          lua5.1 .codex/test_companion_pet_state.lua
+
+      - name: Validate addon
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm test
+
+      - name: Commit validated result
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .codex
+          rm -f .github/workflows/harden-companion-petbar-snapshots.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Journal Companion pet-button takeover" -m "Add CompanionPetState to capture exact original and managed PetActionButton/PetActionBar properties, restore only still-owned values, preserve external conflicts and frame replacement, and force-restore unfinished mutations. Release FeelsGoodUI 0.0.59."
+          git push origin HEAD:codex/companion-petbar-snapshots
