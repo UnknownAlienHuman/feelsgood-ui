@@ -86,7 +86,7 @@ jobs:
           print('Generic state ownership audit passed.')
           PY
 
-      - name: Run Lua registry harnesses
+      - name: Install Lua 5.1
         shell: bash
         run: |
           set -euo pipefail
@@ -94,7 +94,17 @@ jobs:
             sudo apt-get update -qq
             sudo apt-get install -y lua5.1
           fi
+
+      - name: Run Animate registry harness
+        shell: bash
+        run: |
+          set -euo pipefail
           lua5.1 .codex/test_animate_registries.lua
+
+      - name: Run Minimap hook registry harness
+        shell: bash
+        run: |
+          set -euo pipefail
           lua5.1 .codex/test_minimap_hook_registry.lua
 
       - name: Validate addon
