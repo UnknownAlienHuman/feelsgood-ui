@@ -925,11 +925,20 @@ local function SetNativeFrameMouseEnabled(frame, enabled)
     return pcall(frame.EnableMouse, frame, enabled)
 end
 
-local function ApplyClassResourceSuppression(frame)
+local function ApplyClassResourceSuppression(record)
+    local frame = record and record.frame
     if not frame then return false end
-    SetNativeFrameAlpha(frame, 0)
-    SetNativeFrameMouseEnabled(frame, false)
-    return true
+
+    local applied = false
+    if type(record.alpha) == "number" then
+        SetNativeFrameAlpha(frame, 0)
+        applied = true
+    end
+    if type(record.mouseEnabled) == "boolean" then
+        SetNativeFrameMouseEnabled(frame, false)
+        applied = true
+    end
+    return applied
 end
 
 local function RestoreClassResourceRecord(record)
@@ -968,7 +977,7 @@ local function EnsureClassResourceShowHook(owner, frame)
         if owner._classResourceSuppressionActive ~= true then return end
         for _, record in pairs(owner._classResourceSuppression or EMPTY) do
             if record.frame == shownFrame then
-                ApplyClassResourceSuppression(shownFrame)
+                ApplyClassResourceSuppression(record)
                 return
             end
         end
@@ -998,11 +1007,14 @@ local function SuppressClassResourceFrame(owner, name, frame)
             alpha = ReadNativeFrameAlpha(frame),
             mouseEnabled = ReadNativeFrameMouseEnabled(frame),
         }
+        if type(record.alpha) ~= "number" and type(record.mouseEnabled) ~= "boolean" then
+            return false
+        end
         registry[name] = record
     end
 
     EnsureClassResourceShowHook(owner, frame)
-    return ApplyClassResourceSuppression(frame)
+    return ApplyClassResourceSuppression(record)
 end
 
 function Render.RestoreDefaultClassResources(owner)
@@ -1051,6 +1063,9 @@ function Render.SyncDefaultClassResources(owner)
             local frame = _G[name]
             if frame then
                 SuppressClassResourceFrame(owner, name, frame)
+            elseif registry[name] then
+                RestoreClassResourceRecord(registry[name])
+                registry[name] = nil
             end
         end
     end
