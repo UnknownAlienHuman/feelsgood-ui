@@ -57,6 +57,7 @@ local function FinalizeDetach(module)
     end
 
     module._pendingAfterCombat = nil
+    module._pendingPetButtons = nil
     module._pendingDetachRestore = nil
     module._applyingMicroLayout = nil
     module._eventsAttached = false

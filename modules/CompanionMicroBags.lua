@@ -496,6 +496,7 @@ local function UpdateCompactBagCountText(module, profile)
 
     if type(free) ~= "number" or type(total) ~= "number" then
         text:SetText("")
+        module._compactBagSummary = nil
         return
     end
 

@@ -380,9 +380,13 @@ function PetBar:Apply(module, cp, profile)
     end
 
     if not allReady then
+        module._pendingPetButtons = true
         module._pendingAfterCombat = true
-        return false, "Pet action buttons unavailable"
+        return true, "Pet action buttons pending runtime creation"
     end
+
+    module._pendingPetButtons = nil
+    module._pendingAfterCombat = nil
     return true
 end
 

@@ -143,7 +143,9 @@ try {
     assertSourceIncludes('modules/CompanionMicroBags.lua', 'module._bagCountTextByButton');
     assertSourceIncludes('modules/CompanionRuntime.lua', 'local petApplied, petDetail');
     assertSourceIncludes('modules/CompanionRuntime.lua', 'local microApplied, microDetail');
-    assertSourceIncludes('modules/CompanionPetBar.lua', 'return false, "Pet action buttons unavailable"');
+    assertSourceIncludes('modules/CompanionPetBar.lua', 'return true, "Pet action buttons pending runtime creation"');
+    assertSourceIncludes('modules/CompanionPetBar.lua', 'module._pendingPetButtons = nil');
+    assertSourceExcludes('modules/CompanionPetBar.lua', /return false, "Pet action buttons unavailable"/, 'fatal transient pet-button startup');
 
     assertSourceIncludes('core/Media.lua', 'Media._borderRegistry');
     assertSourceIncludes('core/Media.lua', 'function Media:GetBorder(frame)');
