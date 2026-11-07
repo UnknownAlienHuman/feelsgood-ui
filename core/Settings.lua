@@ -773,7 +773,8 @@ function Settings:NormalizeAll()
     local mm = EnsureSection("minimap")
     mm.hide = ValidateBoolean(mm.hide, false)
     mm.minimapPos = ValidateNumber(mm.minimapPos, 0, 360, 220, true)
-    mm.radius = ValidateNumber(mm.radius, 40, 200, 80, true)
+    mm.radius = nil
+    mm.angle = nil
 
     -- Format
     local format = EnsureSection("format")

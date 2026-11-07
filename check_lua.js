@@ -131,6 +131,15 @@ try {
         }
     }
 
+    assertSourceIncludes('core/MinimapIcon.lua', 'local runtimeCfg = {}');
+    assertSourceIncludes('core/MinimapIcon.lua', 'EnsureDragHooks');
+    assertSourceIncludes('core/MinimapIcon.lua', 'CommitDraggedPosition');
+    assertSourceIncludes('core/MinimapIcon.lua', 'LDBIcon:Register(addonName, obj, runtimeCfg)');
+    assertSourceExcludes('core/MinimapIcon.lua', /LDBIcon:Register\(addonName,\s*obj,\s*cfg\)/, 'live minimap profile registration');
+    assertSourceExcludes('core/MinimapIcon.lua', /LDBIcon:Refresh\(addonName,\s*cfg\)/, 'live minimap profile refresh');
+    assertSourceExcludes('core/DB.lua', /minimapPos\s*=\s*220[\s\S]{0,120}radius\s*=/, 'dead minimap radius default');
+    assertSourceExcludes('core/Settings.lua', /mm\.radius\s*=\s*ValidateNumber/, 'dead minimap radius normalization');
+
     assertSourceIncludes('core/DB.lua', 'function DB:ReadSection(section)');
     assertSourceIncludes('core/DB.lua', 'return self:ReadSection(section)');
     assertSourceExcludes('core/DB.lua', /function DB:GetSection[\s\S]*?EnsureSection/, 'write-on-read DB compatibility path');
@@ -164,7 +173,7 @@ try {
     assertSourceIncludes('core/App.lua', 'ActionBars.RestorePersistedNativeState');
     assertSourceExcludes('modules/ActionBarsBlizzardShell.lua', /ImportSideBarStateFromBlizzard/, 'implicit Blizzard-to-profile sidebar import');
     assertSourceExcludes('modules/ActionBarsBlizzardShell.lua', /barsCfg\s*\[\s*[45]\s*\]\.enabled\s*=/, 'direct sidebar profile mutation');
-    assertSourceExcludes('modules/ActionBarsRuntime.lua', /ab\.autoHide\s*=(?!=)/, 'runtime action-bar profile normalization');
+    assertSourceExcludes('modules/ActionBarsRuntime.lua', /\bab\.autoHide\s*=(?!=)/, 'runtime action-bar profile normalization');
 
     assertSourceExcludes('modules/UnitFramesPolicy.lua', /profile\s*\[\s*section\s*\]\s*=/, 'runtime UnitFrames section creation');
     assertSourceExcludes('modules/UnitFramesPolicy.lua', /function\s+Policy\.NormalizeUF/, 'runtime UnitFrames normalizer owner');
