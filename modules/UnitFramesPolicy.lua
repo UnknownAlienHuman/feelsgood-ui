@@ -8,27 +8,22 @@ ns.UnitFramesPolicy = Policy
 local DB = ns.DB
 local Theme = ns.Theme
 
+local EMPTY = {}
+
 Policy.Cache = Policy.Cache or { _ready = false, shortFmt = {} }
 local Cache = Policy.Cache
 
 local function GetSectionTable(profile, section)
-    if type(profile) == "table" then
-        local value = profile[section]
-        if type(value) ~= "table" then
-            value = {}
-            profile[section] = value
-        end
+    local source = profile
+    if type(source) ~= "table" and DB and type(DB.GetProfile) == "function" then
+        source = DB:GetProfile()
+    end
+
+    local value = type(source) == "table" and source[section] or nil
+    if type(value) == "table" then
         return value
     end
-
-    if DB and DB.GetSection then
-        local value = DB:GetSection(section)
-        if type(value) == "table" then
-            return value
-        end
-    end
-
-    return {}
+    return EMPTY
 end
 
 function Policy.GetFormatCfg(profile)
@@ -80,7 +75,7 @@ function Policy.RefreshCache(profile)
     Cache._ready = true
 
     local format = Policy.GetFormatCfg(profile)
-    local sn = (type(format.shortNumbers) == "table") and format.shortNumbers or {}
+    local sn = (type(format.shortNumbers) == "table") and format.shortNumbers or EMPTY
     Cache.shortEnabled = sn.enabled == true
     Cache.shortUnits = (type(sn.units) == "table") and sn.units or nil
     Cache.shortFmt = Cache.shortFmt or {}
@@ -93,12 +88,12 @@ function Policy.RefreshCache(profile)
     Cache.borderSize = (type(style.borderSize) == "number" and style.borderSize) or 1
 
     local uf = Policy.GetUnitFramesCfg(profile)
-    local t = uf.text or {}
+    local t = (type(uf.text) == "table") and uf.text or EMPTY
     Cache.font = t.font or Policy.GetSharedFontToken()
     Cache.auraFont = Cache.font
     Cache.combatHz = (uf.combatTimer and uf.combatTimer.updateHz) or 5
-    Cache.targetInfo = uf.targetInfo or {}
-    Cache.targetAuras = uf.targetAuras or {}
+    Cache.targetInfo = (type(uf.targetInfo) == "table") and uf.targetInfo or EMPTY
+    Cache.targetAuras = (type(uf.targetAuras) == "table") and uf.targetAuras or EMPTY
 
     local colors = (type(uf.colors) == "table") and uf.colors or {}
     local fallback = (type(colors.targetFallback) == "table") and colors.targetFallback or {}
@@ -153,24 +148,6 @@ local function GetDefaultUFSize(defUF, unit)
     return width, height
 end
 
-function Policy.NormalizeUFSizeTables(uf, defUF)
-    if type(uf) ~= "table" then return end
-    uf.sizes = (type(uf.sizes) == "table") and uf.sizes or {}
-
-    local units = { "player", "target", "focus", "targettarget", "pet" }
-    for i = 1, #units do
-        local unit = units[i]
-        local s = uf.sizes[unit]
-        if type(s) ~= "table" then
-            s = {}
-            uf.sizes[unit] = s
-        end
-        local baseW, baseH = GetDefaultUFSize(defUF, unit)
-        if type(s.width) ~= "number" then s.width = baseW end
-        if type(s.height) ~= "number" then s.height = baseH end
-    end
-end
-
 function Policy.GetUnitFrameSize(uf, defUF, unit)
     local defaultW, defaultH = GetDefaultUFSize(defUF, unit)
     if not UF_SIZE_UNITS[unit] then
@@ -192,20 +169,6 @@ local function GetDefaultUFScale(defUF, unit)
     local scales = (type(defUF) == "table" and type(defUF.scales) == "table") and defUF.scales or nil
     local scale = tonumber(scales and scales[unit]) or tonumber(scales and scales.player) or 1
     return scale
-end
-
-function Policy.NormalizeUFScaleTables(uf, defUF)
-    if type(uf) ~= "table" then return end
-
-    uf.scales = (type(uf.scales) == "table") and uf.scales or {}
-
-    local units = { "player", "target", "focus", "targettarget", "pet" }
-    for i = 1, #units do
-        local unit = units[i]
-        if type(uf.scales[unit]) ~= "number" then
-            uf.scales[unit] = GetDefaultUFScale(defUF, unit)
-        end
-    end
 end
 
 function Policy.GetUnitFrameScale(uf, defUF, unit)

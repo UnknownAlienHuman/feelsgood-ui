@@ -4,7 +4,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 
 ## Retail 12.1.5 implementation status
 
-- [x] Target Interface `120105` and release `0.0.51`.
+- [x] Target Interface `120105` and release `0.0.52`.
 - [x] Gate Secret/Restricted Values before Lua inspection, conversion, comparison, or formatting.
 - [x] Integrate restricted Unit Frame and Center Bar handling into the canonical render/target owners; remove late method overrides and duplicate producer calls.
 - [x] Keep opaque power/text on exact native sinks where available; otherwise render an explicit unavailable state.
@@ -21,6 +21,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 - [x] Separate mover geometry preview from persistence: drag/resize hot paths mutate runtime frames only, terminal input creates one validated transaction, and failed/cancelled commits restore the persisted runtime owner.
 - [x] Stage profile import on a detached snapshot and commit through one profile-wide transaction; preserve live root identity/history until every immediate and combat-deferred runtime owner succeeds, restore the prior profile on any late failure, and persist a recovery record for interrupted imports.
 - [x] Make ActionBars native toggle takeover reversible: never copy Blizzard side-bar state into addon profile data, persist a per-character recovery vector across reload/interruption, avoid redundant `SetActionBarToggles` calls, and restore the exact pre-attach vector after out-of-combat or deferred detach.
+- [x] Make UnitFrames runtime configuration read-only: remove render/apply-time size/scale normalizers, stop getters from creating profile sections, and resolve missing values through local immutable fallbacks while DB/Settings/schema remain the only repair owners.
 
 ## Required in-game validation
 
@@ -41,6 +42,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 - [ ] Disable and re-enable UnitFrames/CenterBars repeatedly; no duplicate event owner, stale unit watcher, duplicate frame, or false lifecycle state remains.
 - [ ] Simulate a feature attach/apply failure; the module remains disabled, any new attachment is cleaned up, later feature families still enable, and the exact failure is logged.
 - [ ] Player/target/focus/targettarget frames handle ordinary and restricted health/name/classification values without formatting errors or opaque readback.
+- [ ] Remove a UnitFrames section/size/scale field in a test profile after DB initialization, then create/apply frames; runtime must use defaults without recreating or mutating the missing persisted field, while the next explicit DB/schema normalization repairs it.
 - [ ] Target aura filtering handles ordinary and inaccessible aura-source payloads without indexing denied tables or fields.
 - [ ] Center bars handle ordinary and restricted power/rune values without duplicate producer calls, error loops, retained opaque samples, or stale text.
 - [ ] Companion micro-menu/bag hooks coalesce repeated show/hide/layout requests instead of bypassing the queue; detach cancels both apply and micro-layout generations.

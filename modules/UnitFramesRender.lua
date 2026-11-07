@@ -624,8 +624,6 @@ local function CreateHealthBar(frame)
     local style = GetStyleCfg()
     local unitframesCfg = GetUnitFramesCfg()
     local defaults = (DB.defaults and DB.defaults.profile and DB.defaults.profile.unitframes) or {}
-    Call("NormalizeUFSizeTables", unitframesCfg, defaults)
-    Call("NormalizeUFScaleTables", unitframesCfg, defaults)
 
     local width, height = Call("GetUnitFrameSize", unitframesCfg, defaults, frame.unit)
     frame:SetSize(width, height)

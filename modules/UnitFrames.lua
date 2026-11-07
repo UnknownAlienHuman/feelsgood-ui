@@ -46,8 +46,6 @@ Render:Configure({
     GetUnitFramesCfg = Policy.GetUnitFramesCfg,
     GetUnitFrameScale = Policy.GetUnitFrameScale,
     GetUnitFrameSize = Policy.GetUnitFrameSize,
-    NormalizeUFScaleTables = Policy.NormalizeUFScaleTables,
-    NormalizeUFSizeTables = Policy.NormalizeUFSizeTables,
 })
 
 Runtime:Configure({
@@ -59,8 +57,6 @@ Runtime:Configure({
     GetUnitFrameScale = Policy.GetUnitFrameScale,
     GetUnitFrameSize = Policy.GetUnitFrameSize,
     LayoutUnderFrame = Render.LayoutUnderFrame,
-    NormalizeUFScaleTables = Policy.NormalizeUFScaleTables,
-    NormalizeUFSizeTables = Policy.NormalizeUFSizeTables,
     ResolveRGBA = Render.ResolveRGBA,
     SetStatusBarColorSafe = Render.SetStatusBarColorSafe,
     StartCombatTimer = Render.StartCombatTimer,
