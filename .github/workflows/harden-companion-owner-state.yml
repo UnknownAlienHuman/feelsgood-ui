@@ -1,0 +1,100 @@
+name: Harden Companion owner state
+
+on:
+  push:
+    branches:
+      - codex/companion-owner-state
+    paths:
+      - '.github/workflows/harden-companion-owner-state.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Apply owner-state transform
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .codex/run_harden_companion_owner_state.py
+          git diff --check
+
+      - name: Audit foreign metadata and result flow
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          micro = Path('modules/CompanionMicroBags.lua').read_text()
+          pet = Path('modules/CompanionPetBar.lua').read_text()
+          runtime = Path('modules/CompanionRuntime.lua').read_text()
+          check = Path('check_lua.js').read_text()
+
+          forbidden = [
+              '_fguiCompanionHooked',
+              '_fguiSquareSkinHooked',
+              '_fguiBagCountText',
+              '_fguiBagSummary',
+          ]
+          for needle in forbidden:
+              assert needle not in micro, f'foreign Companion marker remains: {needle}'
+
+          required_micro = [
+              'module._microSourceHooks',
+              'module._bagTextureHooks',
+              'module._bagCountTextByButton',
+              'module._compactBagSummary',
+              'return false, "Companion micro/bag apply deferred in combat"',
+          ]
+          for needle in required_micro:
+              assert needle in micro, f'missing owner-state contract: {needle}'
+
+          assert 'return false, "Pet action buttons unavailable"' in pet
+          assert 'local petApplied, petDetail' in runtime
+          assert 'local microApplied, microDetail' in runtime
+          assert 'PetBar:RestoreDefaultLayout(module)' in runtime
+          assert 'MicroBags:RestoreDefaultLayout(module)' in runtime
+          assert 'Companion apply failed:' in runtime
+          assert 'Companion runtime metadata must stay on the owner' in check
+          print('Companion owner-state/result audit passed.')
+          PY
+
+      - name: Run Lua owner-state harnesses
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v lua5.1 >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y lua5.1
+          fi
+          lua5.1 .codex/test_companion_owner_state.lua
+          lua5.1 .codex/test_companion_runtime_results.lua
+
+      - name: Validate addon
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm test
+
+      - name: Commit validated result
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .codex
+          rm -f .github/workflows/harden-companion-owner-state.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Move Companion runtime state to owner" -m "Keep micro/bag hook registries, compact count objects, and summaries on the Companion owner; make PetBar and MicroBags result-bearing; clean partial presentation and propagate exact failures through Runtime, Lifecycle, and Apply. Release FeelsGoodUI 0.0.58."
+          git push origin HEAD:codex/companion-owner-state
