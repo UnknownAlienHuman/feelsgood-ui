@@ -9,14 +9,11 @@ function InspectorModule.Create(ctx)
     ctx = ctx or {}
 
     local Movers = ctx.Movers
-    local DB = ctx.DB
     local Log = ctx.Log
     local Media = ctx.Media
-    local U = ctx.U
     local L = ctx.L or function(text) return text end
+    local Transactions = ctx.Transactions or ns.MoversTransactions
 
-    local GetProfileSection = ctx.GetProfileSection
-    local EnsureProfileSection = ctx.EnsureProfileSection
     local IsSafeToEdit = ctx.IsSafeToEdit
     local UIParentRect = ctx.UIParentRect
     local GetFrameSnapSize = ctx.GetFrameSnapSize
@@ -26,7 +23,9 @@ function InspectorModule.Create(ctx)
     local RequestApplyForRegisteredKey = ctx.RequestApplyForRegisteredKey
     local GetEditablePosition = ctx.GetEditablePosition
     local SetEditablePosition = ctx.SetEditablePosition
-    local SavePoint = ctx.SavePoint
+    local BuildStoredPointWrites = ctx.BuildStoredPointWrites
+
+    local previewSizes = {}
 
     local function EnsureInspector()
         if Movers._inspector then return Movers._inspector end
@@ -172,7 +171,7 @@ function InspectorModule.Create(ctx)
 
     local function SupportsScale(key)
         local spec = GetSpec(key)
-        return spec and type(spec.getScale) == "function" and type(spec.setScale) == "function"
+        return spec and type(spec.getScale) == "function" and type(spec.buildScaleWrites) == "function"
     end
 
     local function GetScaleValue(key)
@@ -190,21 +189,36 @@ function InspectorModule.Create(ctx)
 
     local function SetScaleValue(key, value)
         local spec = GetSpec(key)
-        if not (spec and type(spec.setScale) == "function") then
-            return
+        local entry = Movers._registered[key]
+        if not (spec and entry and entry.frame and Transactions) then
+            return false
         end
 
         value = Clamp(tonumber(value) or 1, 0.60, 1.30)
-        spec.setScale(value, spec, key)
-        RequestApplyForMover(key)
+        local previewOK, previewDetail = Transactions:Preview(spec, entry.frame, "scale", value)
+        if not previewOK then
+            if Log and Log.Warn then Log:Warn("Mover scale preview failed: " .. tostring(previewDetail)) end
+            return false
+        end
+
+        local changed, detail = Transactions:Commit(spec, "scale", value)
+        if changed == false and detail and Log and Log.Warn then
+            Log:Warn("Mover scale commit failed: " .. tostring(detail))
+        end
+        return changed == true
     end
 
     local function SupportsResize(key)
         local spec = GetSpec(key)
-        return spec and type(spec.getSize) == "function" and type(spec.setSize) == "function"
+        return spec and type(spec.getSize) == "function" and type(spec.buildSizeWrites) == "function"
     end
 
     local function GetResizeValue(key)
+        local preview = previewSizes[key]
+        if type(preview) == "table" then
+            return preview.width, preview.height
+        end
+
         local spec = GetSpec(key)
         if spec and type(spec.getSize) == "function" then
             local w, h = spec.getSize(spec, key)
@@ -214,14 +228,88 @@ function InspectorModule.Create(ctx)
         return 160, 20
     end
 
-    local function SetResizeValue(key, w, h)
+    local function PreviewResizeValue(key, w, h)
         local spec = GetSpec(key)
-        if not (spec and type(spec.setSize) == "function") then
-            return
+        local entry = Movers._registered[key]
+        if not (spec and entry and entry.frame and Transactions) then
+            return nil, nil
         end
 
-        spec.setSize(w, h, spec, key)
+        local ok, first, second = Transactions:Preview(spec, entry.frame, "size", w, h)
+        if not ok then
+            if Log and Log.Warn then Log:Warn("Mover size preview failed: " .. tostring(first)) end
+            return nil, nil
+        end
+
+        local width = tonumber(first) or tonumber(w)
+        local height = tonumber(second) or tonumber(h)
+        if type(width) ~= "number" or type(height) ~= "number" then
+            return nil, nil
+        end
+
+        previewSizes[key] = { width = width, height = height }
+        return width, height
+    end
+
+    local function CancelResizePreview(key)
+        if previewSizes[key] == nil then
+            return false
+        end
+        previewSizes[key] = nil
         RequestApplyForMover(key)
+        return true
+    end
+
+    local function AppendWrites(target, writes)
+        if type(writes) ~= "table" then return end
+        if type(writes.path) == "table" then
+            target[#target + 1] = writes
+            return
+        end
+        for i = 1, #writes do target[#target + 1] = writes[i] end
+    end
+
+    local function SetResizeValue(key, w, h)
+        local spec = GetSpec(key)
+        local entry = Movers._registered[key]
+        if not (spec and entry and entry.frame and Transactions) then
+            return false
+        end
+
+        local width, height = PreviewResizeValue(key, w, h)
+        if type(width) ~= "number" or type(height) ~= "number" then
+            return false
+        end
+
+        local sizeWrites, sizeError = Transactions:BuildWrites(spec, "size", width, height)
+        if not sizeWrites then
+            previewSizes[key] = nil
+            Transactions:Restore(spec.applyKeys)
+            if Log and Log.Warn then Log:Warn("Mover size write build failed: " .. tostring(sizeError)) end
+            return false
+        end
+
+        local positionWrites, positionApplyKeys, positionPanelKey, positionError
+        if type(BuildStoredPointWrites) == "function" then
+            positionWrites, positionApplyKeys, positionPanelKey, positionError = BuildStoredPointWrites(key, entry.frame)
+        end
+        if not positionWrites then
+            previewSizes[key] = nil
+            Transactions:Restore(Transactions:MergeApplyKeys(spec.applyKeys, positionApplyKeys or "movers"))
+            if Log and Log.Warn then Log:Warn("Mover resize position build failed: " .. tostring(positionError)) end
+            return false
+        end
+
+        local writes = {}
+        AppendWrites(writes, sizeWrites)
+        AppendWrites(writes, positionWrites)
+        local applyKeys = Transactions:MergeApplyKeys(spec.applyKeys, positionApplyKeys)
+        local changed, detail = Transactions:CommitWrites(applyKeys, writes, spec.panelKey or positionPanelKey)
+        previewSizes[key] = nil
+        if changed == false and detail and Log and Log.Warn then
+            Log:Warn("Mover size commit failed: " .. tostring(detail))
+        end
+        return changed == true
     end
 
     local function ComputeWheelResizePair(w, h, delta, uniform)
@@ -251,23 +339,29 @@ function InspectorModule.Create(ctx)
 
         if (not altDown) and SupportsScale(key) then
             local scale = GetScaleValue(key)
-            SetScaleValue(key, scale + ((tonumber(delta) or 0) * 0.02))
-            return true
+            return SetScaleValue(key, scale + ((tonumber(delta) or 0) * 0.02))
         end
 
-        if altDown and type(spec.onWheel) == "function" then
-            local changed = spec.onWheel(tonumber(delta) or 0, shiftDown == true, spec, key)
-            if changed == true then
-                RequestApplyForMover(key)
-                return true
+        if altDown and type(spec.buildWheelWrites) == "function" and Transactions then
+            local entry = Movers._registered[key]
+            local amount = tonumber(delta) or 0
+            local previewOK, previewDetail = Transactions:Preview(spec, entry and entry.frame, "wheel", amount, shiftDown == true)
+            if not previewOK then
+                if Log and Log.Warn then Log:Warn("Mover wheel preview failed: " .. tostring(previewDetail)) end
+                return false
             end
+
+            local changed, detail = Transactions:Commit(spec, "wheel", amount, shiftDown == true)
+            if changed == false and detail and Log and Log.Warn then
+                Log:Warn("Mover wheel commit failed: " .. tostring(detail))
+            end
+            return changed == true
         end
 
         if altDown and SupportsResize(key) then
             local w, h = GetResizeValue(key)
             local nw, nh = ComputeWheelResizePair(w, h, delta, shiftDown)
-            SetResizeValue(key, nw, nh)
-            return true
+            return SetResizeValue(key, nw, nh)
         end
 
         return false
@@ -317,6 +411,76 @@ function InspectorModule.Create(ctx)
         f.title:SetText(L("Inspector: %s"):format(title))
     end
 
+    local function CommitInspectorValues(key, frame, x, y, scale, width, height)
+        local spec = GetSpec(key)
+        if not (spec and frame and Transactions) then return false end
+
+        local writes = {}
+        local applyKeys = {}
+        local panelKey = spec.panelKey or "editmode"
+
+        if SupportsScale(key) and type(scale) == "number" then
+            scale = Clamp(scale, 0.60, 1.30)
+            local previewOK, previewDetail = Transactions:Preview(spec, frame, "scale", scale)
+            if not previewOK then
+                Transactions:Restore(spec.applyKeys)
+                if Log and Log.Warn then Log:Warn("Mover inspector scale preview failed: " .. tostring(previewDetail)) end
+                return false
+            end
+            local scaleWrites, detail = Transactions:BuildWrites(spec, "scale", scale)
+            if not scaleWrites then
+                Transactions:Restore(spec.applyKeys)
+                if Log and Log.Warn then Log:Warn("Mover inspector scale build failed: " .. tostring(detail)) end
+                return false
+            end
+            AppendWrites(writes, scaleWrites)
+            applyKeys = Transactions:MergeApplyKeys(applyKeys, spec.applyKeys)
+        end
+
+        if SupportsResize(key) and type(width) == "number" and type(height) == "number" then
+            local previewWidth, previewHeight = PreviewResizeValue(key, width, height)
+            if type(previewWidth) ~= "number" or type(previewHeight) ~= "number" then
+                Transactions:Restore(Transactions:MergeApplyKeys(applyKeys, spec.applyKeys))
+                return false
+            end
+            local sizeWrites, detail = Transactions:BuildWrites(spec, "size", previewWidth, previewHeight)
+            previewSizes[key] = nil
+            if not sizeWrites then
+                Transactions:Restore(Transactions:MergeApplyKeys(applyKeys, spec.applyKeys))
+                if Log and Log.Warn then Log:Warn("Mover inspector size build failed: " .. tostring(detail)) end
+                return false
+            end
+            AppendWrites(writes, sizeWrites)
+            applyKeys = Transactions:MergeApplyKeys(applyKeys, spec.applyKeys)
+        end
+
+        if type(x) == "number" and type(y) == "number" then
+            local fw, fh = GetFrameSnapSize(frame)
+            x, y = ClampCenterOffsets(x, y, fw, fh)
+            SetPosition(key, frame, x, y)
+            if type(BuildStoredPointWrites) ~= "function" then
+                Transactions:Restore(Transactions:MergeApplyKeys(applyKeys, spec.applyKeys, "movers"))
+                return false
+            end
+            local positionWrites, positionKeys, positionPanel, detail = BuildStoredPointWrites(key, frame)
+            if not positionWrites then
+                Transactions:Restore(Transactions:MergeApplyKeys(applyKeys, spec.applyKeys, positionKeys or "movers"))
+                if Log and Log.Warn then Log:Warn("Mover inspector position build failed: " .. tostring(detail)) end
+                return false
+            end
+            AppendWrites(writes, positionWrites)
+            applyKeys = Transactions:MergeApplyKeys(applyKeys, positionKeys)
+            panelKey = positionPanel or panelKey
+        end
+
+        if #writes == 0 then return false end
+        local changed, detail = Transactions:CommitWrites(applyKeys, writes, panelKey)
+        if changed == false and detail and Log and Log.Warn then
+            Log:Warn("Mover inspector commit failed: " .. tostring(detail))
+        end
+        return changed == true
+    end
+
     local function ShowInspectorFor(key, overlay)
         local entry = Movers._registered[key]
         if not entry or not entry.frame then
@@ -342,30 +506,15 @@ function InspectorModule.Create(ctx)
                 return
             end
 
-            local x = tonumber(self.ex:GetText())
-            local y = tonumber(self.ey:GetText())
-            if type(x) == "number" and type(y) == "number" then
-                local fw, fh = GetFrameSnapSize(inspectFrame)
-                x, y = ClampCenterOffsets(x, y, fw, fh)
-                SetPosition(inspectKey, inspectFrame, x, y)
-                SavePoint(inspectKey, inspectFrame)
-            end
-
-            if SupportsScale(inspectKey) then
-                local scale = tonumber(self.es:GetText())
-                if type(scale) == "number" then
-                    SetScaleValue(inspectKey, scale)
-                end
-            end
-
-            if SupportsResize(inspectKey) then
-                local w = tonumber(self.ew:GetText())
-                local h = tonumber(self.eh:GetText())
-                if type(w) == "number" and type(h) == "number" then
-                    SetResizeValue(inspectKey, w, h)
-                end
-            end
-
+            CommitInspectorValues(
+                inspectKey,
+                inspectFrame,
+                tonumber(self.ex:GetText()),
+                tonumber(self.ey:GetText()),
+                SupportsScale(inspectKey) and tonumber(self.es:GetText()) or nil,
+                SupportsResize(inspectKey) and tonumber(self.ew:GetText()) or nil,
+                SupportsResize(inspectKey) and tonumber(self.eh:GetText()) or nil
+            )
             UpdateInspector(inspectKey, inspectFrame)
         end
 
@@ -381,6 +530,8 @@ function InspectorModule.Create(ctx)
         SupportsScale = SupportsScale,
         SupportsResize = SupportsResize,
         GetResizeValue = GetResizeValue,
+        PreviewResizeValue = PreviewResizeValue,
+        CancelResizePreview = CancelResizePreview,
         SetResizeValue = SetResizeValue,
         GetScaleValue = GetScaleValue,
         SetScaleValue = SetScaleValue,

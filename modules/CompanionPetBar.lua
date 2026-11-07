@@ -12,6 +12,8 @@ local Shared = ns.CompanionShared
 
 local PET_VISIBILITY_DRIVER = "[petbattle][overridebar][vehicleui][possessbar,@vehicle,exists] hide; [@pet,exists] show; hide"
 
+local PreviewPetLayout
+
 local function CreatePetBarMoverSpec()
     return {
         label = "PetBar",
@@ -22,23 +24,50 @@ local function CreatePetBarMoverSpec()
             local size = Shared:ClampButtonSize(cp.buttonSize)
             return size, size
         end,
-        setSize = function(width, height)
+        buildSizeWrites = function(width, height)
             local rw = tonumber(width) or 32
             local rh = tonumber(height)
-            if type(rh) ~= "number" then
-                rh = rw
-            end
-
-            local cp = Shared:GetCompanionCfg(nil)
-            cp.buttonSize = Shared:ClampButtonSize((rw + rh) * 0.5)
+            if type(rh) ~= "number" then rh = rw end
+            return {
+                path = { "companion", "buttonSize" },
+                value = Shared:ClampButtonSize((rw + rh) * 0.5),
+                rule = { type = "int", min = 24, max = 60, fallback = 32 },
+            }
         end,
-        onWheel = function(delta, shiftDown)
+        previewSize = function(_, width, height)
+            local rw = tonumber(width) or 32
+            local rh = tonumber(height)
+            if type(rh) ~= "number" then rh = rw end
+            local cp = Shared:GetCompanionCfg(nil)
+            local size = Shared:ClampButtonSize((rw + rh) * 0.5)
+            local ok, detail = PreviewPetLayout(ns.Companion, size, Shared:ClampSpacing(cp.spacing))
+            if ok == false then return false, detail end
+            return size, size
+        end,
+        buildWheelWrites = function(delta, shiftDown)
             local cp = Shared:GetCompanionCfg(nil)
             if shiftDown then
-                cp.spacing = Shared:ClampSpacing((tonumber(cp.spacing) or 0) + delta)
-            else
-                cp.buttonSize = Shared:ClampButtonSize((tonumber(cp.buttonSize) or 32) + delta)
+                return {
+                    path = { "companion", "spacing" },
+                    value = Shared:ClampSpacing((tonumber(cp.spacing) or 0) + delta),
+                    rule = { type = "int", min = 0, max = 12, fallback = 0 },
+                }
             end
+
+            return {
+                path = { "companion", "buttonSize" },
+                value = Shared:ClampButtonSize((tonumber(cp.buttonSize) or 32) + delta),
+                rule = { type = "int", min = 24, max = 60, fallback = 32 },
+            }
+        end,
+        previewWheel = function(_, delta, shiftDown)
+            local cp = Shared:GetCompanionCfg(nil)
+            local size = Shared:ClampButtonSize(cp.buttonSize)
+            local spacing = Shared:ClampSpacing(cp.spacing)
+            if shiftDown then spacing = Shared:ClampSpacing(spacing + delta)
+            else size = Shared:ClampButtonSize(size + delta) end
+            local ok, detail = PreviewPetLayout(ns.Companion, size, spacing)
+            if ok == false then return false, detail end
             return true
         end,
     }
@@ -161,6 +190,32 @@ local function StylePetButton(button, size, showHotkeys, profile)
             hotkey:Hide()
         end
     end
+end
+
+PreviewPetLayout = function(module, size, spacing)
+    if not module then
+        return false, "Companion preview owner unavailable"
+    end
+    if Shared:IsInCombat() then
+        return false, "Companion preview blocked in combat"
+    end
+
+    local holder = EnsurePetAnchor(module)
+    if not holder then
+        return false, "Pet bar holder unavailable"
+    end
+
+    holder:SetSize((Shared.PET_BUTTONS * size) + ((Shared.PET_BUTTONS - 1) * spacing), size)
+    for i = 1, Shared.PET_BUTTONS do
+        local button = _G["PetActionButton" .. i]
+        if button then
+            button:SetParent(holder)
+            button:ClearAllPoints()
+            button:SetPoint("LEFT", holder, "LEFT", (i - 1) * (size + spacing), 0)
+            button:SetSize(size, size)
+        end
+    end
+    return true
 end
 
 local function ResetPetButtonParent(button)

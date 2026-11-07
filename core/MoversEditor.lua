@@ -35,6 +35,8 @@ function EditorModule.Create(ctx)
     local SavePoint = ctx.SavePoint
     local SupportsResize = ctx.SupportsResize
     local GetResizeValue = ctx.GetResizeValue
+    local PreviewResizeValue = ctx.PreviewResizeValue
+    local CancelResizePreview = ctx.CancelResizePreview
     local SetResizeValue = ctx.SetResizeValue
     local HandleWheelAction = ctx.HandleWheelAction
 
@@ -138,6 +140,16 @@ function EditorModule.Create(ctx)
         overlay._snapYT = nil
         overlay._startW = 0
         overlay._startH = 0
+        overlay._previewW = nil
+        overlay._previewH = nil
+        overlay._anchorPrepared = false
+        overlay._cancelPreview = function()
+            overlay._previewW = nil
+            overlay._previewH = nil
+            if type(CancelResizePreview) == "function" then
+                CancelResizePreview(key)
+            end
+        end
 
         local function UpdateHandleVisibility()
             local cfg = EditorCfg()
@@ -188,8 +200,7 @@ function EditorModule.Create(ctx)
                 return
             end
 
-            EnsureCenterAnchor(key, frame)
-
+            overlay._anchorPrepared = false
             SetActiveMover(key, overlay)
 
             local cx, cy = GetCursorUI()
@@ -221,6 +232,10 @@ function EditorModule.Create(ctx)
 
                 local nx = overlay._startX + dx
                 local ny = overlay._startY + dy
+                if not overlay._anchorPrepared then
+                    EnsureCenterAnchor(key, frame)
+                    overlay._anchorPrepared = true
+                end
                 local fw, fh = GetFrameSnapSize(frame)
 
                 if overlay._snapXT and overlay._snapYT then
@@ -281,13 +296,14 @@ function EditorModule.Create(ctx)
                 return
             end
 
-            EnsureCenterAnchor(key, frame)
-
+            overlay._anchorPrepared = false
             SetActiveMover(key, overlay)
 
             local cx, cy = GetCursorUI()
             overlay._startCursorX, overlay._startCursorY = cx, cy
             overlay._startW, overlay._startH = GetResizeValue(key)
+            overlay._previewW = overlay._startW
+            overlay._previewH = overlay._startH
             overlay._resizing = true
 
             ShowInspectorFor(key, overlay)
@@ -305,7 +321,17 @@ function EditorModule.Create(ctx)
                 local nw = overlay._startW + dx
                 local nh = overlay._startH - dy
 
-                SetResizeValue(key, nw, nh)
+                if not overlay._anchorPrepared then
+                    EnsureCenterAnchor(key, frame)
+                    overlay._anchorPrepared = true
+                end
+                if type(PreviewResizeValue) == "function" then
+                    local width, height = PreviewResizeValue(key, nw, nh)
+                    if type(width) == "number" and type(height) == "number" then
+                        overlay._previewW = width
+                        overlay._previewH = height
+                    end
+                end
                 UpdateInspector(key, frame)
             end)
         end)
@@ -316,6 +342,13 @@ function EditorModule.Create(ctx)
             end
             overlay._resizing = false
             overlay:SetScript("OnUpdate", nil)
+            local width = overlay._previewW or overlay._startW
+            local height = overlay._previewH or overlay._startH
+            if type(SetResizeValue) == "function" then
+                SetResizeValue(key, width, height)
+            end
+            overlay._previewW = nil
+            overlay._previewH = nil
             UpdateInspector(key, frame)
         end)
 

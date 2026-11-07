@@ -19,11 +19,11 @@ local U = ns.U
 local L = ns.L or function(text) return text end
 local Shared = ns.MoversShared or {}
 local SnapGridModule = ns.MoversSnapGrid
+local Transactions = ns.MoversTransactions
 local InspectorModule = ns.MoversInspector
 local EditorModule = ns.MoversEditor
 
 local GetProfileSection = Shared.GetProfileSection
-local EnsureProfileSection = Shared.EnsureProfileSection
 local IsSafeToEdit = Shared.IsSafeToEdit
 local UIParentRect = Shared.UIParentRect
 local UIWH = Shared.UIWH
@@ -38,6 +38,8 @@ local GetEditablePosition = Shared.GetEditablePosition
 local SetEditablePosition = Shared.SetEditablePosition
 local EnsureCenterAnchor = Shared.EnsureCenterAnchor
 local SavePoint = Shared.SavePoint
+local BuildStoredPointWrites = Shared.BuildStoredPointWrites
+local ResolveStoredPointFromFrame = Shared.ResolveStoredPointFromFrame
 local GridStep = Shared.GridStep
 local EditorCfg = Shared.EditorCfg
 local RequestApplyForKeys = Shared.RequestApplyForKeys
@@ -80,13 +82,10 @@ local HideGuides = SnapGrid.HideGuides or function() end
 
 local Inspector = (type(InspectorModule) == "table" and type(InspectorModule.Create) == "function") and InspectorModule.Create({
     Movers = Movers,
-    DB = DB,
     Log = Log,
     Media = Media,
-    U = U,
     L = L,
-    GetProfileSection = GetProfileSection,
-    EnsureProfileSection = EnsureProfileSection,
+    Transactions = Transactions,
     IsSafeToEdit = IsSafeToEdit,
     UIParentRect = UIParentRect,
     GetFrameSnapSize = GetFrameSnapSize,
@@ -104,8 +103,12 @@ local Inspector = (type(InspectorModule) == "table" and type(InspectorModule.Cre
     SetEditablePosition = function(key, frame, x, y)
         return SetEditablePosition(key, frame, x, y, Movers:GetSpec(key))
     end,
-    SavePoint = function(key, frame)
-        return SavePoint(key, frame, Movers:GetSpec(key))
+    BuildStoredPointWrites = function(key, frame)
+        local spec = Movers:GetSpec(key)
+        local point = ResolveStoredPointFromFrame(key, frame, spec)
+        if not point then return nil, nil, nil, "Mover position unavailable" end
+        local _, writes, applyKeys, panelKey, detail = BuildStoredPointWrites(key, spec, point, frame)
+        return writes, applyKeys, panelKey, detail
     end,
 }) or {}
 
@@ -116,6 +119,8 @@ local SetPosition = Inspector.SetPosition or function() end
 local SupportsScale = Inspector.SupportsScale or function() return false end
 local SupportsResize = Inspector.SupportsResize or function() return false end
 local GetResizeValue = Inspector.GetResizeValue or function() return 160, 20 end
+local PreviewResizeValue = Inspector.PreviewResizeValue or function(_, width, height) return width, height end
+local CancelResizePreview = Inspector.CancelResizePreview or function() return false end
 local SetResizeValue = Inspector.SetResizeValue or function() end
 local GetScaleValue = Inspector.GetScaleValue or function() return 1 end
 local SetScaleValue = Inspector.SetScaleValue or function() end
@@ -155,11 +160,12 @@ local Editor = (type(EditorModule) == "table" and type(EditorModule.Create) == "
     SupportsScale = SupportsScale,
     SupportsResize = SupportsResize,
     GetResizeValue = GetResizeValue,
+    PreviewResizeValue = PreviewResizeValue,
+    CancelResizePreview = CancelResizePreview,
     SetResizeValue = SetResizeValue,
     GetScaleValue = GetScaleValue,
     SetScaleValue = SetScaleValue,
     ComputeWheelResizePair = ComputeWheelResizePair,
-    EnsureProfileSection = EnsureProfileSection,
     HandleWheelAction = HandleWheelAction,
 }) or {}
 
@@ -187,6 +193,12 @@ local function NormalizeRegistrationSpec(key, label, spec)
     normalized.key = key
     if type(normalized.positionKey) ~= "string" or normalized.positionKey == "" then
         normalized.positionKey = key
+    end
+    if normalized.positionApplyKeys == nil then
+        normalized.positionApplyKeys = "movers"
+    end
+    if type(normalized.panelKey) ~= "string" or normalized.panelKey == "" then
+        normalized.panelKey = "editmode"
     end
     if type(normalized.label) ~= "string" or normalized.label == "" then
         normalized.label = label or key
@@ -218,6 +230,9 @@ local function AbortOverlayInteraction(overlay)
     overlay._snapXT = nil
     overlay._snapYT = nil
     overlay:SetScript("OnUpdate", nil)
+    if type(overlay._cancelPreview) == "function" then
+        overlay._cancelPreview()
+    end
     SetOverlayActiveVisual(overlay, false)
 end
 
@@ -258,7 +273,30 @@ function Movers:RequestApplyFor(key)
         spec.requestApply(spec, key)
         return
     end
-    RequestApplyForKeys(spec and spec.applyKeys, key)
+
+    local keys
+    if Transactions and type(Transactions.MergeApplyKeys) == "function" then
+        keys = Transactions:MergeApplyKeys(
+            spec and spec.applyKeys,
+            (spec and spec.positionApplyKeys) or "movers"
+        )
+    else
+        keys = {}
+        local seen = {}
+        local function Add(value)
+            if type(value) == "string" then
+                if value ~= "" and not seen[value] then
+                    seen[value] = true
+                    keys[#keys + 1] = value
+                end
+            elseif type(value) == "table" then
+                for i = 1, #value do Add(value[i]) end
+            end
+        end
+        Add(spec and spec.applyKeys)
+        Add((spec and spec.positionApplyKeys) or "movers")
+    end
+    return RequestApplyForKeys(keys, key)
 end
 
 function Movers:Register(key, frame, label, spec)
@@ -318,15 +356,44 @@ function Movers:ResetPositions()
 
     self:ClearActiveInteraction()
 
-    local positions = EnsureProfileSection("positions")
-    wipe(positions)
-    for key, value in pairs(defaults) do
-        positions[key] = U.DeepCopy(value)
+    if not (Transactions and type(Transactions.CommitWrites) == "function") then
+        Log:Warn("Mover transaction owner unavailable.")
+        return false
     end
-    self:ReapplyAll()
 
-    for key in pairs(self._registered) do
-        self:RequestApplyFor(key)
+    local positions = GetProfileSection("positions")
+    local writes = {}
+
+    for key in pairs(positions) do
+        if defaults[key] == nil then
+            writes[#writes + 1] = { path = { "positions", key }, value = nil }
+        end
+    end
+
+    for key, value in pairs(defaults) do
+        local current = positions[key]
+        local same = type(current) == "table"
+            and current.point == value.point
+            and current.relPoint == value.relPoint
+            and tonumber(current.x) == tonumber(value.x)
+            and tonumber(current.y) == tonumber(value.y)
+        if not same then
+            writes[#writes + 1] = {
+                path = { "positions", key },
+                value = U.DeepCopy(value),
+            }
+        end
+    end
+
+    if #writes == 0 then
+        Log:Info("Positions already match defaults")
+        return false
+    end
+
+    local changed, detail = Transactions:CommitWrites("movers", writes, "editmode")
+    if changed == false then
+        if detail then Log:Warn("Position reset failed: " .. tostring(detail)) end
+        return false
     end
 
     Log:Info("Positions reset to defaults")
@@ -338,9 +405,6 @@ local function ApplyUnlockedState(owner, state, opts)
     local unlocked = state == true
     local changed = owner._unlocked ~= unlocked
     owner._unlocked = unlocked
-
-    local movers = EnsureProfileSection("movers")
-    movers.unlocked = owner._unlocked
 
     for _, entry in pairs(owner._registered) do
         if entry.overlay then
@@ -397,8 +461,35 @@ function Movers:UnregisterStateListener(key)
     self._stateListeners[key] = nil
 end
 
+function Movers:PreviewUnlocked(state, opts)
+    if not IsSafeToEdit() then
+        return false, "Mover preview blocked in combat"
+    end
+    ApplyUnlockedState(self, state, opts)
+    return true
+end
+
 function Movers:SetUnlocked(state)
-    ApplyUnlockedState(self, state)
+    local unlocked = state == true
+    if not (Transactions and type(Transactions.CommitWrites) == "function") then
+        Log:Warn("Mover state transaction owner unavailable.")
+        return false
+    end
+
+    local changed, detail = Transactions:CommitWrites("movers", {
+        path = { "movers", "unlocked" },
+        value = unlocked,
+        rule = { type = "boolean", fallback = false },
+    }, "editmode")
+    if changed == false and detail then
+        Log:Warn("Mover lock-state commit failed: " .. tostring(detail))
+        return false
+    end
+
+    if IsSafeToEdit() then
+        ApplyUnlockedState(self, unlocked)
+    end
+    return changed == true
 end
 
 function Movers:SyncFromProfile()
@@ -422,6 +513,19 @@ function Movers:RefreshEditorSettings()
             entry._handleRefresh()
         end
     end
+end
+
+function Movers:ApplyConfig()
+    if InCombatLockdown() then
+        return false, "Movers apply blocked in combat"
+    end
+
+    self:ClearActiveInteraction()
+    local movers = GetProfileSection("movers")
+    ApplyUnlockedState(self, movers.unlocked == true, { silent = true })
+    self:ReapplyAll()
+    self:RefreshEditorSettings()
+    return true
 end
 
 -- Rebuild grid on resize/scale changes (only while unlocked)

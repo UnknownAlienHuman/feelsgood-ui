@@ -329,6 +329,35 @@ local function EnsureActionChangedCallback(module)
     end, module)
 end
 
+function Runtime.PreviewMoverLayout(module, size, spacing)
+    if not IsReady(module) or IsDetached(module) then
+        return false, "ActionBars preview owner unavailable"
+    end
+    if InCombat() then
+        return false, "ActionBars preview blocked in combat"
+    end
+
+    local ab = GetActionBarsCfg()
+    module:EnsureCreated()
+
+    local barsCfg = (type(ab.bars) == "table") and ab.bars or {}
+    local showHotkeys = (ab.showHotkeys == true)
+    local styleCfg = (Visuals and Visuals.BuildStyleConfig and Visuals.BuildStyleConfig(size)) or {}
+    local allOk = true
+
+    for id = 1, ACTION_BAR_COUNT do
+        local holder = module.bars and module.bars[id]
+        if not ApplyBarHolderConfig(module, holder, barsCfg[id], styleCfg, size, spacing, showHotkeys) then
+            allOk = false
+        end
+    end
+
+    if not allOk then
+        return false, "ActionBars preview could not acquire every button"
+    end
+    return true
+end
+
 function Runtime.ApplyNow(module)
     local db = DB or ns.DB
     if not db then

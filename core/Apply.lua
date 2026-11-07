@@ -32,6 +32,7 @@ local FALLBACK_ORDER = {
     "actionbars",
     "companion",
     "minimap",
+    "movers",
 }
 
 Apply._dirty = Apply._dirty or {}
@@ -202,6 +203,8 @@ local function ExecuteApplyKey(key)
         return CallFallback(ns.Companion, "ApplyConfig", key)
     elseif key == "minimap" then
         return CallFallback(ns.MinimapIcon, "ApplyConfig", key)
+    elseif key == "movers" then
+        return CallFallback(ns.Movers, "ApplyConfig", key)
     end
 
     return false, "Unknown apply key: " .. tostring(key)
@@ -315,7 +318,6 @@ function Apply:Flush()
         end
     end
 
-    local appliedKeys = {}
     local failedKey = nil
     local failedErr = nil
 
@@ -331,7 +333,6 @@ function Apply:Flush()
             break
         end
 
-        appliedKeys[#appliedKeys + 1] = key
     end
 
     if not failedKey then
@@ -341,9 +342,13 @@ function Apply:Flush()
 
     local previouslyCommittedKeys = FinalizePending(batchKeys, "Rollback")
 
+    -- Rollback may invalidate a runtime-only preview owned by a key that had
+    -- not executed yet when an earlier key failed. Reconcile every key from
+    -- this executable slice, not only the applied/failed prefix.
     local restoreSet = {}
-    for i = 1, #appliedKeys do restoreSet[appliedKeys[i]] = true end
-    restoreSet[failedKey] = true
+    for i = 1, #orderedKeys do
+        restoreSet[orderedKeys[i]] = true
+    end
     for i = 1, #(previouslyCommittedKeys or {}) do
         restoreSet[previouslyCommittedKeys[i]] = true
     end

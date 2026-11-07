@@ -625,6 +625,7 @@ local SHARED_APPLY_RESOLVE_ORDER = {
     "actionbars",
     "companion",
     "minimap",
+    "movers",
 }
 
 local APPLY_KEY_THEME = "theme"

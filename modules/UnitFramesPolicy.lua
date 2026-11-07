@@ -230,14 +230,15 @@ function Policy.CreateUnitMoverSpec(unit, label)
         getScale = function()
             local uf = Policy.GetUnitFramesCfg()
             local defUF = (DB.defaults and DB.defaults.profile and DB.defaults.profile.unitframes) or {}
-            Policy.NormalizeUFScaleTables(uf, defUF)
             return Policy.GetUnitFrameScale(uf, defUF, unit)
         end,
-        setScale = function(value)
-            local uf = Policy.GetUnitFramesCfg()
+        buildScaleWrites = function(value)
             local defUF = (DB.defaults and DB.defaults.profile and DB.defaults.profile.unitframes) or {}
-            Policy.NormalizeUFScaleTables(uf, defUF)
-            uf.scales[unit] = ClampNum(value, 0.60, 1.30, GetDefaultUFScale(defUF, unit))
+            return {
+                path = { "unitframes", "scales", unit },
+                value = ClampNum(value, 0.60, 1.30, GetDefaultUFScale(defUF, unit)),
+                rule = { type = "number", min = 0.60, max = 1.30, fallback = GetDefaultUFScale(defUF, unit) },
+            }
         end,
     }
 
@@ -245,24 +246,16 @@ function Policy.CreateUnitMoverSpec(unit, label)
         spec.getSize = function()
             local uf = Policy.GetUnitFramesCfg()
             local defUF = (DB.defaults and DB.defaults.profile and DB.defaults.profile.unitframes) or {}
-            Policy.NormalizeUFSizeTables(uf, defUF)
             return Policy.GetUnitFrameSize(uf, defUF, unit)
         end
 
-        spec.setSize = function(width, height)
-            local uf = Policy.GetUnitFramesCfg()
+        spec.buildSizeWrites = function(width, height)
             local defUF = (DB.defaults and DB.defaults.profile and DB.defaults.profile.unitframes) or {}
-            Policy.NormalizeUFSizeTables(uf, defUF)
-
-            local entry = uf.sizes and uf.sizes[unit]
-            if type(entry) ~= "table" then
-                entry = {}
-                uf.sizes[unit] = entry
-            end
-
             local fallbackW, fallbackH = GetDefaultUFSize(defUF, unit)
-            entry.width = ClampWhole(width, 120, 520, fallbackW)
-            entry.height = ClampWhole(height, 14, 40, fallbackH)
+            return {
+                { path = { "unitframes", "sizes", unit, "width" }, value = ClampWhole(width, 120, 520, fallbackW), rule = { type = "int", min = 120, max = 520, fallback = fallbackW } },
+                { path = { "unitframes", "sizes", unit, "height" }, value = ClampWhole(height, 14, 40, fallbackH), rule = { type = "int", min = 14, max = 40, fallback = fallbackH } },
+            }
         end
     end
 

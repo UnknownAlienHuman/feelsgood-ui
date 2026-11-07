@@ -282,12 +282,39 @@ local function CaptureHistoryArtifact(before)
     return nil
 end
 
+local function RemoveEmptyBatchOwner(container)
+    if type(container) ~= "table" or #container ~= 0 then
+        return
+    end
+
+    local panels = Settings and Settings._undoPanels
+    if type(panels) ~= "table" then
+        return
+    end
+
+    for panelKey, stack in pairs(panels) do
+        if type(stack) == "table" then
+            for i = #stack, 1, -1 do
+                local entry = stack[i]
+                if type(entry) == "table" and entry.changes == container then
+                    table.remove(stack, i)
+                    if #stack == 0 and panels[panelKey] == stack then
+                        panels[panelKey] = nil
+                    end
+                    return
+                end
+            end
+        end
+    end
+end
+
 local function RemoveArtifact(artifact)
     local container = artifact and artifact.container
     if type(container) ~= "table" then return false end
     for i = #container, 1, -1 do
         if container[i] == artifact.entry then
             table.remove(container, i)
+            RemoveEmptyBatchOwner(container)
             return true
         end
     end
@@ -438,8 +465,7 @@ function Tx:CommitKeys(keys)
     return #finished > 0
 end
 
-function Tx:RollbackKeys(keys)
-    local transactions = Gather(keys)
+local function RollbackTransactions(transactions)
     table.sort(transactions, function(a, b) return a.id > b.id end)
     local callbacks, restoreKeys = {}, {}
     for i = 1, #transactions do
@@ -452,6 +478,28 @@ function Tx:RollbackKeys(keys)
         if type(transaction.onRollback) == "function" then callbacks[#callbacks + 1] = transaction.onRollback end
     end
     return (#callbacks > 0 and callbacks or nil), UniqueStrings(restoreKeys)
+end
+
+function Tx:Checkpoint()
+    return tonumber(self._nextID) or 0
+end
+
+function Tx:RollbackAfter(checkpoint, keys)
+    checkpoint = tonumber(checkpoint) or 0
+    local gathered = Gather(keys)
+    local transactions = {}
+    for i = 1, #gathered do
+        local transaction = gathered[i]
+        if (tonumber(transaction.id) or 0) > checkpoint then
+            transactions[#transactions + 1] = transaction
+        end
+    end
+    return RollbackTransactions(transactions)
+end
+
+function Tx:RollbackKeys(keys)
+    local transactions = Gather(keys)
+    return RollbackTransactions(transactions)
 end
 
 function Tx:RunRollbackCallbacks(callbacks)

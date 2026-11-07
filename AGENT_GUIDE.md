@@ -8,7 +8,7 @@ The executable entry points are `core/Bootstrap.lua:ns` and `core/Events.lua:OnE
 
 ## Runtime map
 
-- `core/DB.lua:DB:Init` creates/migrates `FeelsGoodUIDB`, profiles, and sections. `core/Settings.lua` is the intended settings-write API; `core/Apply.lua` batches dirty apply keys, restores failed transactions, and defers combat-sensitive keys until `Apply:OnCombatEnd`. `core/PanelTransactions.lua` journals scalar writes plus panel undo/reset. `core/RuntimeSettings.lua` is the canonical apply owner for logging and the performance overlay.
+- `core/DB.lua:DB:Init` creates/migrates `FeelsGoodUIDB`, profiles, and sections. `core/Settings.lua` is the intended settings-write API; `core/Apply.lua` batches dirty apply keys, restores failed transactions, and defers combat-sensitive keys until `Apply:OnCombatEnd`. `core/PanelTransactions.lua` journals scalar writes plus panel undo/reset. `core/RuntimeSettings.lua` owns logging/performance presentation; `core/MoversTransactions.lua` owns mover preview-to-commit transitions and composes position plus feature geometry into one terminal transaction.
 - `core/FeatureRegistry.lua` is the contract table: feature order, apply order, panel order, module contracts, and theme consumers. `core/Lifecycle.lua:RegisterModule/Enable/Disable/EnableAll` supplies guarded module state and result-aware transitions.
 - `core/App.lua:RegisterFeatureModules`, `EnableFeatureModules`, `RunStartupServices`, and `ApplyTheme` connect registry contracts to modules. `core/Events.lua` routes `ADDON_LOADED`, `PLAYER_LOGIN`, combat transitions, and blocked/forbidden action diagnostics.
 - Unit frames: `modules/UnitFrames.lua` configures `UnitFramesPolicy`, `UnitFramesRender`, `UnitFramesRuntime`, `UnitFramesTarget`, and `UnitFramesText`, using external `oUF` frames. `UnitFramesRuntime`/`UnitFramesTarget` attach event observers for target/name/faction/level/auras.
@@ -31,14 +31,14 @@ The executable entry points are `core/Bootstrap.lua:ns` and `core/Events.lua:OnE
 - Change apply order or combat deferral: `core/FeatureRegistry.lua` apply order plus `core/Apply.lua`; do not patch a module to bypass the queue.
 - Unit frame behavior: route layout/text/target/aura changes to `modules/UnitFrames*.lua`; keep `modules/UnitFrames.lua` as facade/configuration.
 - Action bars: route secure holder/visibility to `ActionBarsState.lua`/`ActionBarsRuntime.lua`, Blizzard/Edit Mode synchronization to their dedicated files, and visual details to `ActionBarsVisuals.lua`.
-- Options/movers/commands: modify the corresponding `core/Options*`, `Movers*`, or `Commands.lua` adapter and preserve Settings/Apply ownership.
+- Options/movers/commands: modify the corresponding adapter and preserve Settings/Apply ownership. Continuous mover input may preview runtime frames only; build validated writes in the feature mover spec and commit through `MoversTransactions` once at the terminal input event.
 
 ## Invariants/risks
 
 - `oUF` must exist before unit-frame startup; missing `oUF` is a hard functional dependency and is logged by `App:RunStartupServices`.
 - Secure action-bar holders, state drivers, Edit Mode, `SetAttribute`, and Blizzard shell visibility are protected boundaries. Defer mutations in combat and validate `ADDON_ACTION_BLOCKED`, `ADDON_ACTION_FORBIDDEN`, and `MACRO_ACTION_FORBIDDEN` reports.
 - Unit-frame/center-bar runtime handlers are event-driven hot paths. Preserve caches and narrow unit filters; avoid per-event allocations and unsafe arithmetic/comparisons on secret values (`core/Secret.lua`, `modules/UnitFramesText.lua`).
-- Settings transaction rollback and apply-key ordering are correctness invariants: profile state, undo history, and runtime state must commit together or restore together.
+- Settings transaction rollback and apply-key ordering are correctness invariants: profile state, undo history, and runtime state must commit together or restore together. A mover resize that changes both feature geometry and anchor position is one multi-owner transaction, not independent writes.
 - User-facing adapters must not update runtime optimistically after a profile write; the apply owner performs the runtime transition and reports failure back to the journal.
 - `core/Bootstrap.lua` temporarily exposes a debug global; keep it removable through `HideDebugGlobal`.
 
@@ -48,7 +48,7 @@ Static checks:
 
 ```powershell
 Get-Content _Addons/FeelsGoodUI/FeelsGoodUI.toc
-rg -n "RequiredDeps|FeelsGoodUIDB|RuntimeSettings|SetTx|Apply:Request|RegisterModule|Apply:OnCombatEnd|ADDON_ACTION_BLOCKED|SecureHandler|oUF" _Addons/FeelsGoodUI
+rg -n "RequiredDeps|FeelsGoodUIDB|RuntimeSettings|MoversTransactions|SetTx|Apply:Request|RegisterModule|Apply:OnCombatEnd|ADDON_ACTION_BLOCKED|SecureHandler|oUF" _Addons/FeelsGoodUI
 ```
 
 In-game: test with and without `oUF`; reload/login; enable/disable every feature family; edit movers and reload; profile export/import/reset; Edit Mode and action-bar visibility; target/party/raid unit changes; resource/spec changes; enter/leave combat; `/fgui` command help and recent errors. Check command/UI parity for debug, perf, aura mode, and minimap state. Check the existing regression matrix in `docs/REGRESSION_MATRIX_1_25.md` and inspect BugGrabber for protected-action errors.
