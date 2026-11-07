@@ -1,5 +1,6 @@
 name: Harden UnitFrames config purity
 
+# Re-run after switching the contract insertion to a unique structural anchor.
 on:
   push:
     branches:
