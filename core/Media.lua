@@ -20,6 +20,9 @@ if _G.LibStub then
 end
 Media.LSM = LSM
 
+Media._borderRegistry = Media._borderRegistry or setmetatable({}, { __mode = "k" })
+local BorderRegistry = Media._borderRegistry
+
 -- -----------------------------
 -- Base primitives
 -- -----------------------------
@@ -32,50 +35,82 @@ function Media:CreateColorTex(parent, r, g, b, a, drawLayer, subLevel)
     return tex
 end
 
--- 1px border (simple, fast, no complex backdrops).
+local function ResolveBorderColor(theme)
+    local color = theme and theme.colors and theme.colors.border or nil
+    if type(color) ~= "table" then
+        return 0, 0, 0, 1
+    end
+    return color.r or 0, color.g or 0, color.b or 0, color.a or 1
+end
+
+local function ApplyBorderGeometry(border, size)
+    border:ClearAllPoints()
+    border:SetPoint("TOPLEFT", -size, size)
+    border:SetPoint("BOTTOMRIGHT", size, -size)
+    if border.SetBackdrop then
+        local backdrop = border:GetBackdrop() or {
+            edgeFile = "Interface/Buttons/WHITE8x8",
+            edgeSize = size,
+        }
+        backdrop.edgeSize = size
+        border:SetBackdrop(backdrop)
+    end
+end
+
+function Media:GetBorder(frame)
+    local record = frame and BorderRegistry[frame] or nil
+    return record and record.border or nil
+end
+
+function Media:SetBorderColor(frame, r, g, b, a)
+    local border = self:GetBorder(frame)
+    if not (border and type(border.SetBackdropBorderColor) == "function") then
+        return false
+    end
+    border:SetBackdropBorderColor(r or 0, g or 0, b or 0, a or 0)
+    return true
+end
+
+-- 1px border (simple, fast, no complex backdrops). Border ownership stays in
+-- Media's weak-key registry; foreign Blizzard frames are never stamped with
+-- addon-specific fields.
 function Media:CreateBorder(frame, size)
-    -- Default to theme border size when not specified.
-    local t = Theme and Theme.Get and Theme:Get() or nil
-    local defaultSize = (t and t.style and t.style.borderSize) or 1
+    if not frame then return nil end
+
+    local theme = Theme and Theme.Get and Theme:Get() or nil
+    local defaultSize = (theme and theme.style and theme.style.borderSize) or 1
     size = (type(size) == "number") and size or defaultSize
 
-    -- If border already exists, allow lightweight updates (size/color) without realloc.
-    if frame.__fguiBorder then
-        local b = frame.__fguiBorder
-        if frame.__fguiBorderSize ~= size then
-            b:ClearAllPoints()
-            b:SetPoint("TOPLEFT", -size, size)
-            b:SetPoint("BOTTOMRIGHT", size, -size)
-            if b.SetBackdrop then
-                local bd = b:GetBackdrop() or { edgeFile = "Interface/Buttons/WHITE8x8", edgeSize = size }
-                bd.edgeSize = size
-                b:SetBackdrop(bd)
-            end
-            frame.__fguiBorderSize = size
+    local record = BorderRegistry[frame]
+    local border = record and record.border or nil
+    if border then
+        if record.size ~= size then
+            ApplyBorderGeometry(border, size)
+            record.size = size
         end
-        -- Color refresh
-        local bc = (t and t.colors and t.colors.border) or { r=0,g=0,b=0,a=1 }
-        if b.SetBackdropBorderColor then
-            b:SetBackdropBorderColor(bc.r or 0, bc.g or 0, bc.b or 0, bc.a or 1)
+        local r, g, b, a = ResolveBorderColor(theme)
+        if border.SetBackdropBorderColor then
+            border:SetBackdropBorderColor(r, g, b, a)
         end
-        return b
+        return border
     end
 
-    local b = CreateFrame("Frame", nil, frame, "BackdropTemplate")
-    b:SetFrameLevel(frame:GetFrameLevel() + 1)
-    b:SetPoint("TOPLEFT", -size, size)
-    b:SetPoint("BOTTOMRIGHT", size, -size)
-
-    b:SetBackdrop({
+    border = CreateFrame("Frame", nil, frame, "BackdropTemplate")
+    border:SetFrameLevel(frame:GetFrameLevel() + 1)
+    border:SetBackdrop({
         edgeFile = "Interface/Buttons/WHITE8x8",
         edgeSize = size,
     })
-    local bc = (t and t.colors and t.colors.border) or { r=0,g=0,b=0,a=1 }
-    b:SetBackdropBorderColor(bc.r or 0, bc.g or 0, bc.b or 0, bc.a or 1)
+    ApplyBorderGeometry(border, size)
 
-    frame.__fguiBorder = b
-    frame.__fguiBorderSize = size
-    return b
+    local r, g, b, a = ResolveBorderColor(theme)
+    border:SetBackdropBorderColor(r, g, b, a)
+
+    BorderRegistry[frame] = {
+        border = border,
+        size = size,
+    }
+    return border
 end
 
 function Media:ApplyIconCrop(tex, inset)

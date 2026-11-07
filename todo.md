@@ -4,7 +4,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 
 ## Retail 12.1.5 implementation status
 
-- [x] Target Interface `120105` and release `0.0.56`.
+- [x] Target Interface `120105` and release `0.0.57`.
 - [x] Gate Secret/Restricted Values before Lua inspection, conversion, comparison, or formatting.
 - [x] Integrate restricted Unit Frame and Center Bar handling into the canonical render/target owners; remove late method overrides and duplicate producer calls.
 - [x] Keep opaque power/text on exact native sinks where available; otherwise render an explicit unavailable state.
@@ -26,6 +26,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 - [x] Isolate LibDBIcon from SavedVariables: use a detached minimap proxy during drag, commit one normalized position on drag stop, restore persisted state on failure/cancel, and remove the dead per-addon radius field.
 - [x] Make ExperienceBar native takeover narrow and reversible: capture alpha/mouse state without hiding foreign frames, keep one lifecycle apply owner, re-suppress after Blizzard refreshes, and restore only properties still carrying addon-owned values.
 - [x] Make CenterBars class-resource takeover narrow and reversible: keep snapshots/hooks on the owner, never stamp or Hide/Show/Setup foreign frames, handle native frame replacement, and preserve newer conflicting alpha/mouse changes on release.
+- [x] Move border ownership out of target frames: `Media` now keeps weak-key records, exposes explicit lookup/color APIs, and static validation rejects `__fguiBorder*` metadata anywhere in first-party Lua.
 
 ## Required in-game validation
 
@@ -42,6 +43,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 - [ ] Hold a long mover drag/resize and verify zero SavedVariables writes, zero apply requests, and zero undo entries before the terminal input event.
 - [ ] Resize/scale ActionBars, UnitFrames, CenterBars, Companion PetBar, and ExperienceBar; each terminal action produces one undo entry and one owner apply.
 - [ ] Give Blizzard status-tracking manager/containers distinctive alpha, mouse and visibility states, enable/disable ExperienceBar repeatedly, trigger native refreshes, and verify no foreign `Hide`/`Show`, one lifecycle apply, exact owned-property restore, and preservation of conflicting newer changes.
+- [ ] Repeatedly skin and restore Blizzard pet/micro/bag buttons; border frames are reused through `Media` without any `__fguiBorder*` fields on the target buttons, and transparent release is reversed by the next theme/style apply.
 - [ ] Force mover position/scale/size apply failure; profile, exact undo artifact, and visible frame geometry return to the persisted state.
 - [ ] Lock Edit Mode while resize preview is active; preview state is discarded and the persisted geometry is restored without a stale commit.
 - [ ] Start with UnitFrames and CenterBars disabled, log in, then enable them without `/reload`; frames initialize once, observers/events attach once, and live updates begin immediately.
