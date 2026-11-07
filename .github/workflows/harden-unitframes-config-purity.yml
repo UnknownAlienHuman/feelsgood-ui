@@ -25,7 +25,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python .codex/harden_unitframes_config_purity.py
+          python .codex/run_harden_unitframes_config_purity.py
           git diff --check
 
       - name: Audit runtime ownership
