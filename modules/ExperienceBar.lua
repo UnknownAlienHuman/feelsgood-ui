@@ -101,61 +101,118 @@ local STATUS_TRACKING_FRAME_NAMES = {
     "SecondaryStatusTrackingBarContainer",
 }
 
-local function SoftHideStatusTrackingFrame(frame)
-    if not frame then
-        return
-    end
-    pcall(frame.SetAlpha, frame, 0)
-    pcall(frame.Hide, frame)
+local function ReadFrameAlpha(frame)
+    if not (frame and type(frame.GetAlpha) == "function") then return nil end
+    local ok, value = pcall(frame.GetAlpha, frame)
+    return ok and type(value) == "number" and value or nil
 end
 
-local function HideBlizzardStatusTracking()
+local function ReadFrameMouseEnabled(frame)
+    if not (frame and type(frame.IsMouseEnabled) == "function") then return nil end
+    local ok, value = pcall(frame.IsMouseEnabled, frame)
+    if not ok or type(value) ~= "boolean" then return nil end
+    return value
+end
+
+local function SetFrameAlpha(frame, value)
+    if not (frame and type(frame.SetAlpha) == "function" and type(value) == "number") then
+        return false
+    end
+    local current = ReadFrameAlpha(frame)
+    if current == value then return true end
+    return pcall(frame.SetAlpha, frame, value)
+end
+
+local function SetFrameMouseEnabled(frame, enabled)
+    if not (frame and type(frame.EnableMouse) == "function" and type(enabled) == "boolean") then
+        return false
+    end
+    local current = ReadFrameMouseEnabled(frame)
+    if current == enabled then return true end
+    return pcall(frame.EnableMouse, frame, enabled)
+end
+
+local function CaptureStatusTrackingFrame(module, frame)
+    if type(module) ~= "table" or type(frame) ~= "table" then return nil end
+    module._statusTrackingSnapshot = type(module._statusTrackingSnapshot) == "table"
+        and module._statusTrackingSnapshot
+        or {}
+
+    local record = module._statusTrackingSnapshot[frame]
+    if record then return record end
+
+    record = {
+        alpha = ReadFrameAlpha(frame),
+        mouseEnabled = ReadFrameMouseEnabled(frame),
+    }
+    module._statusTrackingSnapshot[frame] = record
+    return record
+end
+
+local function SuppressBlizzardStatusTracking(module)
     for i = 1, #STATUS_TRACKING_FRAME_NAMES do
-        SoftHideStatusTrackingFrame(_G[STATUS_TRACKING_FRAME_NAMES[i]])
+        local frame = _G[STATUS_TRACKING_FRAME_NAMES[i]]
+        if type(frame) == "table" then
+            CaptureStatusTrackingFrame(module, frame)
+            SetFrameAlpha(frame, 0)
+            SetFrameMouseEnabled(frame, false)
+        end
     end
+    return true
 end
 
-local function RestoreBlizzardStatusTracking()
-    local manager = _G.StatusTrackingBarManager
-    if not manager then
-        return
-    end
+local function RestoreBlizzardStatusTracking(module)
+    local snapshot = module and module._statusTrackingSnapshot
+    if type(snapshot) ~= "table" then return true end
 
-    pcall(manager.SetAlpha, manager, 1)
-    pcall(manager.Show, manager)
-
-    if type(manager.UpdateBarsShown) == "function" then
-        pcall(manager.UpdateBarsShown, manager)
+    module._statusTrackingSnapshot = nil
+    for frame, record in pairs(snapshot) do
+        if type(frame) == "table" and type(record) == "table" then
+            -- Restore only properties that still carry our suppression value.
+            -- A different owner changing them while attached wins.
+            if type(record.alpha) == "number" and ReadFrameAlpha(frame) == 0 then
+                SetFrameAlpha(frame, record.alpha)
+            end
+            if type(record.mouseEnabled) == "boolean" and ReadFrameMouseEnabled(frame) == false then
+                SetFrameMouseEnabled(frame, record.mouseEnabled)
+            end
+        end
     end
-    if type(manager.UpdateBarVisuals) == "function" then
-        pcall(manager.UpdateBarVisuals, manager, true)
-    end
+    return true
 end
 
 local function EnsureStatusTrackingHooks(module)
-    if module._statusTrackingHooked then
-        return
-    end
+    if module._statusTrackingHooked then return true end
 
     local manager = _G.StatusTrackingBarManager
-    if type(manager) ~= "table" then
-        return
+    local secureHook = _G.hooksecurefunc or hooksecurefunc
+    if type(manager) ~= "table" or type(secureHook) ~= "function" then
+        return false
     end
 
-    local function Rehide()
+    local hooked = false
+    local function Resuppress()
         if module._suppressBlizzardTracking == true then
-            HideBlizzardStatusTracking()
+            SuppressBlizzardStatusTracking(module)
         end
     end
 
     if type(manager.UpdateBarsShown) == "function" then
-        hooksecurefunc(manager, "UpdateBarsShown", Rehide)
+        secureHook(manager, "UpdateBarsShown", Resuppress)
+        hooked = true
     end
     if type(manager.UpdateBarVisuals) == "function" then
-        hooksecurefunc(manager, "UpdateBarVisuals", Rehide)
+        secureHook(manager, "UpdateBarVisuals", Resuppress)
+        hooked = true
     end
 
-    module._statusTrackingHooked = true
+    module._statusTrackingHooked = hooked
+    return hooked
+end
+
+local function MaintainStatusTrackingOwnership(module)
+    EnsureStatusTrackingHooks(module)
+    return SuppressBlizzardStatusTracking(module)
 end
 
 local function SetBarVisible(bar, shouldShow, immediate)
@@ -530,8 +587,11 @@ local function EnsureEventFrame(module)
         if (event == "PLAYER_XP_UPDATE" or event == "HONOR_XP_UPDATE" or event == "PLAYER_MAX_LEVEL_UPDATE") and unit and unit ~= "player" then
             return
         end
-        if ns and ns.ExperienceBar and ns.ExperienceBar.Update then
-            ns.ExperienceBar:Update()
+        if module._suppressBlizzardTracking == true then
+            MaintainStatusTrackingOwnership(module)
+        end
+        if type(module.Update) == "function" then
+            module:Update()
         end
     end)
 
@@ -540,22 +600,26 @@ local function EnsureEventFrame(module)
 end
 
 function XP:ApplyConfig()
-    local cfg = GetCfg()
-    local bar = EnsureFrame(self)
-    local ev = EnsureEventFrame(self)
+    local initialized, initDetail = self:Init()
+    if initialized == false then return false, initDetail end
 
-    EnsureStatusTrackingHooks(self)
+    local cfg = GetCfg()
+    local bar = self._bar
+    local ev = self._events
+    if not (bar and ev) then
+        return false, "ExperienceBar runtime owners unavailable"
+    end
 
     ev:UnregisterAllEvents()
     if not cfg.enabled then
         self._suppressBlizzardTracking = nil
-        RestoreBlizzardStatusTracking()
+        RestoreBlizzardStatusTracking(self)
         SetBarVisible(bar, false, true)
-        return
+        return true
     end
 
     self._suppressBlizzardTracking = true
-    HideBlizzardStatusTracking()
+    MaintainStatusTrackingOwnership(self)
 
     ev:RegisterEvent("PLAYER_ENTERING_WORLD")
     ev:RegisterEvent("PLAYER_XP_UPDATE")
@@ -569,54 +633,46 @@ function XP:ApplyConfig()
     ev:RegisterEvent("DISABLE_XP_GAIN")
 
     self:Update()
+    return true
 end
 
 function XP:Attach()
-    if self._attached then
-        return
-    end
+    if self._attached then return true end
+
+    local initialized, detail = self:Init()
+    if initialized == false then return false, detail end
     self._attached = true
-    self:Init()
+    return true
 end
 
 function XP:Detach()
-    if not self._attached then
-        return
-    end
     self._attached = false
 
     if self._events and self._events.UnregisterAllEvents then
         self._events:UnregisterAllEvents()
     end
     self._suppressBlizzardTracking = nil
-    RestoreBlizzardStatusTracking()
+    RestoreBlizzardStatusTracking(self)
     if self._bar then
         SetBarVisible(self._bar, false, true)
     end
-end
-
-function XP:Enable()
-    self:Attach()
-    self:ApplyConfig()
-end
-
-function XP:Disable()
-    self:Detach()
+    return true
 end
 
 function XP:Init()
-    if self._inited then
-        return
+    if self._inited then return true end
+
+    local bar = EnsureFrame(self)
+    local events = EnsureEventFrame(self)
+    if not (bar and events) then
+        return false, "ExperienceBar initialization failed"
     end
+
     self._inited = true
-
-    EnsureFrame(self)
-    EnsureEventFrame(self)
-    self:ApplyConfig()
-
     if Log and Log.Debug then
         Log:Debug("ExperienceBar loaded")
     end
+    return true
 end
 
 return XP
