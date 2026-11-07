@@ -19,8 +19,8 @@ local VALID_POINTS = {
 }
 
 local function GetProfileSection(section)
-    if DB and DB.GetSection then
-        local value = DB:GetSection(section)
+    if DB and DB.ReadSection then
+        local value = DB:ReadSection(section)
         if type(value) == "table" then
             return value
         end

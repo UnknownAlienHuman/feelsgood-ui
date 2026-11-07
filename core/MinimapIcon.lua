@@ -22,7 +22,7 @@ local dataObj
 local isRegistered = false
 
 local function GetCfg()
-    local config = DB and DB.GetSection and DB:GetSection("minimap")
+    local config = DB and DB.ReadSection and DB:ReadSection("minimap")
     return type(config) == "table" and config or nil
 end
 

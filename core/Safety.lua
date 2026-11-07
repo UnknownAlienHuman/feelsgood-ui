@@ -35,8 +35,8 @@ local function WantSafe(event)
     local safe = true
     local safeFast = false
 
-    if DB and DB.GetSection then
-        local general = DB:GetSection("general")
+    if DB and DB.ReadSection then
+        local general = DB:ReadSection("general")
         if type(general) == "table" then
             if general.safeHandlers ~= nil then safe = (general.safeHandlers == true) end
             if general.safeHandlersFast ~= nil then safeFast = (general.safeHandlersFast == true) end

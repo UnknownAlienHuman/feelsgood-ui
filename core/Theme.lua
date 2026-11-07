@@ -66,16 +66,16 @@ end
 
 -- Refresh tokens from DB (if available).
 function Theme:RefreshFromDB()
-    if not DB or not DB.GetSection then return end
+    if not DB or not DB.ReadSection then return end
 
     -- Style primitives
     local style = nil
-    local theme = DB:GetSection("theme")
-    local media = DB:GetSection("media")
+    local theme = DB:ReadSection("theme")
+    local media = DB:ReadSection("media")
     if type(theme) == "table" and type(theme.style) == "table" then
         style = theme.style
     else
-        local baseStyle = DB:GetSection("style")
+        local baseStyle = DB:ReadSection("style")
         if type(baseStyle) == "table" then
         -- Back-compat (pre v23)
             style = baseStyle

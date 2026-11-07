@@ -26,10 +26,10 @@ local lastEvents = 0
 local lastCalls = {}
 
 local function GetGeneralCfg()
-    if not (DB and DB.GetSection) then
+    if not (DB and DB.ReadSection) then
         return nil
     end
-    local general = DB:GetSection("general")
+    local general = DB:ReadSection("general")
     return type(general) == "table" and general or nil
 end
 

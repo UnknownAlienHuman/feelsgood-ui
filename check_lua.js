@@ -123,7 +123,17 @@ try {
         if (firstParty && !tocSet.has(name)) {
             errors.push(`FeelsGoodUI.toc: first-party Lua file is not loaded: '${name}'`);
         }
+        if (firstParty && name !== 'core/DB.lua') {
+            const source = fs.readFileSync(file, 'utf8');
+            if (/\b(?:DB|db)(?:\.|:)\s*GetSection\b/.test(source)) {
+                errors.push(`${name}: use DB:ReadSection for reads or DB:EnsureSection for writes; GetSection is compatibility-only`);
+            }
+        }
     }
+
+    assertSourceIncludes('core/DB.lua', 'function DB:ReadSection(section)');
+    assertSourceIncludes('core/DB.lua', 'return self:ReadSection(section)');
+    assertSourceExcludes('core/DB.lua', /function DB:GetSection[\s\S]*?EnsureSection/, 'write-on-read DB compatibility path');
 
     assertBefore(tocEntries, 'core/Secret.lua', 'core/Utils.lua');
     assertBefore(tocEntries, 'core/Settings.lua', 'core/Apply.lua');

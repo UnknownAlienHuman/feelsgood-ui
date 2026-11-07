@@ -4,7 +4,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 
 ## Retail 12.1.5 implementation status
 
-- [x] Target Interface `120105` and release `0.0.52`.
+- [x] Target Interface `120105` and release `0.0.53`.
 - [x] Gate Secret/Restricted Values before Lua inspection, conversion, comparison, or formatting.
 - [x] Integrate restricted Unit Frame and Center Bar handling into the canonical render/target owners; remove late method overrides and duplicate producer calls.
 - [x] Keep opaque power/text on exact native sinks where available; otherwise render an explicit unavailable state.
@@ -22,12 +22,14 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 - [x] Stage profile import on a detached snapshot and commit through one profile-wide transaction; preserve live root identity/history until every immediate and combat-deferred runtime owner succeeds, restore the prior profile on any late failure, and persist a recovery record for interrupted imports.
 - [x] Make ActionBars native toggle takeover reversible: never copy Blizzard side-bar state into addon profile data, persist a per-character recovery vector across reload/interruption, avoid redundant `SetActionBarToggles` calls, and restore the exact pre-attach vector after out-of-combat or deferred detach.
 - [x] Make UnitFrames runtime configuration read-only: remove render/apply-time size/scale normalizers, stop getters from creating profile sections, and resolve missing values through local immutable fallbacks while DB/Settings/schema remain the only repair owners.
+- [x] Enforce one DB read/write boundary across core and feature families: `ReadSection` is pure, `EnsureSection` is explicit mutation, the compatibility `GetSection` no longer creates data, and static checks reject first-party runtime use of it.
 
 ## Required in-game validation
 
 - [ ] Record `GetBuildInfo()` and confirm Interface `120105` on the tested client.
 - [ ] Fresh login and `/reload` complete with zero repeating Lua errors.
 - [ ] `/fgui qa` and `/fgui report` complete without legacy-field or schema failures.
+- [ ] Remove a core/feature section after DB initialization, then open Theme, Safety, Minimap, QA, Movers, ActionBars, CenterBars, Companion and their settings panels; readers must not recreate the section, while one explicit `EnsureSection`/Settings normalization repairs it.
 - [ ] Toggle debug and perf from both General settings and slash commands; profile, runtime state, and `Undo last` stay identical after success and rollback.
 - [ ] Run `/fgui aura mini|classic`; UnitFrames apply executes through the normal queue and a forced failure restores the prior mode/history.
 - [ ] Show/hide/reset the minimap icon from settings and slash commands; position reset is one undo action and failed `LibDBIcon` apply rolls back hide/position values.

@@ -566,8 +566,6 @@ local function SetProfileValueRaw(path, value)
     local root
     if DB and DB.EnsureSection then
         root = DB:EnsureSection(path[1])
-    elseif DB and DB.GetSection then
-        root = DB:GetSection(path[1])
     end
     if type(root) ~= "table" then
         return false
@@ -718,8 +716,8 @@ local function ResolvePendingApplyKeys(state)
 end
 
 local function GetProfileSection(section)
-    if DB and DB.GetSection then
-        local value = DB:GetSection(section)
+    if DB and DB.ReadSection then
+        local value = DB:ReadSection(section)
         if type(value) == "table" then
             return value
         end

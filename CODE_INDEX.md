@@ -5,7 +5,7 @@
 | `FeelsGoodUI.toc` | Metadata, dependency, and load order. |
 | `FeelsGoodUI.lua` | Final addon entry file. |
 | `core/Bootstrap.lua`, `core/Events.lua`, `core/Lifecycle.lua`, `core/App.lua` | Namespace, lifecycle, event handling, and feature orchestration, including pre-enable recovery of interrupted native ActionBars takeover. |
-| `core/DB.lua`, `core/Schema.lua`, `core/Settings.lua`, `core/Apply.lua` | Saved variables, migrations, validated setting writes, apply ordering, and runtime restoration. |
+| `core/DB.lua`, `core/Schema.lua`, `core/Settings.lua`, `core/Apply.lua` | Saved variables, migrations, pure `ReadSection` vs explicit `EnsureSection`, validated setting writes, apply ordering, and runtime restoration. |
 | `core/RuntimeSettings.lua` | Canonical apply owner for general runtime state: logging level and performance overlay. |
 | `core/MoversTransactions.lua` | Pure mover write builders, runtime-only position/geometry preview, one-shot Settings commits, and preview restoration after failure/cancel. |
 | `core/PanelTransactions.lua` | Ordered `SetTx`/undo/reset/profile-replacement journal, ownership-aware rollback, multi-key commit tracking, history repair, and terminal callbacks. |

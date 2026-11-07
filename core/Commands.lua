@@ -25,10 +25,10 @@ end
 
 local function GetSection(section)
     local db = ns.DB
-    if not (db and db.GetSection) then
+    if not (db and db.ReadSection) then
         return nil
     end
-    local value = db:GetSection(section)
+    local value = db:ReadSection(section)
     if type(value) ~= "table" then
         return nil
     end
