@@ -30,39 +30,43 @@ jobs:
           path = Path('core/MoversTransactions.lua')
           source = path.read_text()
 
-          old = '''        if not ok then
-              return false, first
-          end
-          if first == false then
-              return false, second or ("Mover " .. operation .. " preview returned false")
-          end
-          '''
-          new = '''        if not ok then
-              RestorePreview(spec.applyKeys)
-              return false, first
-          end
-          if first == false then
-              RestorePreview(spec.applyKeys)
-              return false, second or ("Mover " .. operation .. " preview returned false")
-          end
-          '''
+          old = (
+              '        if not ok then\n'
+              '            return false, first\n'
+              '        end\n'
+              '        if first == false then\n'
+              '            return false, second or ("Mover " .. operation .. " preview returned false")\n'
+              '        end\n'
+          )
+          new = (
+              '        if not ok then\n'
+              '            RestorePreview(spec.applyKeys)\n'
+              '            return false, first\n'
+              '        end\n'
+              '        if first == false then\n'
+              '            RestorePreview(spec.applyKeys)\n'
+              '            return false, second or ("Mover " .. operation .. " preview returned false")\n'
+              '        end\n'
+          )
           if old not in source:
               raise SystemExit('preview failure block not found')
           source = source.replace(old, new, 1)
 
-          old = '''    if not okSnapshots then
-              RestorePreview(applyKeys)
-              LogError("Mover transaction snapshot failed: " .. tostring(writeSnapshots))
-              return false, writeSnapshots
-          end
-          '''
-          new = '''    if not okSnapshots or type(writeSnapshots) ~= "table" then
-              local detail = okSnapshots and "Mover transaction snapshot unavailable" or writeSnapshots
-              RestorePreview(applyKeys)
-              LogError("Mover transaction snapshot failed: " .. tostring(detail))
-              return false, detail
-          end
-          '''
+          old = (
+              '    if not okSnapshots then\n'
+              '        RestorePreview(applyKeys)\n'
+              '        LogError("Mover transaction snapshot failed: " .. tostring(writeSnapshots))\n'
+              '        return false, writeSnapshots\n'
+              '    end\n'
+          )
+          new = (
+              '    if not okSnapshots or type(writeSnapshots) ~= "table" then\n'
+              '        local detail = okSnapshots and "Mover transaction snapshot unavailable" or writeSnapshots\n'
+              '        RestorePreview(applyKeys)\n'
+              '        LogError("Mover transaction snapshot failed: " .. tostring(detail))\n'
+              '        return false, detail\n'
+              '    end\n'
+          )
           if old not in source:
               raise SystemExit('snapshot failure block not found')
           path.write_text(source.replace(old, new, 1))
