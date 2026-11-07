@@ -1,0 +1,79 @@
+name: Harden Media border ownership
+
+on:
+  push:
+    branches:
+      - codex/media-border-registry
+    paths:
+      - '.github/workflows/harden-media-border-registry.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Apply border registry transform
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .codex/harden_media_border_registry.py
+          git diff --check
+
+      - name: Audit border ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          media = Path('core/Media.lua').read_text()
+          pet = Path('modules/CompanionPetBar.lua').read_text()
+          check = Path('check_lua.js').read_text()
+
+          assert 'Media._borderRegistry' in media
+          assert 'function Media:GetBorder(frame)' in media
+          assert 'function Media:SetBorderColor(frame, r, g, b, a)' in media
+          assert '__fguiBorder' not in media
+          assert '__fguiBorder' not in pet
+          assert 'Media:SetBorderColor(button, 0, 0, 0, 0)' in pet
+          assert 'border ownership must stay in Media' in check
+          print('Media border ownership audit passed.')
+          PY
+
+      - name: Run Lua registry harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v lua5.1 >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y lua5.1
+          fi
+          lua5.1 .codex/test_media_border_registry.lua
+
+      - name: Validate addon
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm test
+
+      - name: Commit validated result
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .codex
+          rm -f .github/workflows/harden-media-border-registry.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Move border ownership into Media" -m "Replace target-frame __fguiBorder metadata with a weak-key Media registry, expose explicit border lookup/color APIs, migrate CompanionPetBar restore, and statically reject foreign-frame border markers. Release FeelsGoodUI 0.0.57."
+          git push origin HEAD:codex/media-border-registry
