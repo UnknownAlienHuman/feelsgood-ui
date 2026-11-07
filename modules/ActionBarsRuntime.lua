@@ -320,12 +320,8 @@ local function EnsureActionChangedCallback(module)
                 return
             end
         end
-        if button and button.__fguiUpdateChecked then
-            button.__fguiUpdateChecked(button)
-        end
-        if button and button.__fguiUpdateEmpty then
-            button.__fguiUpdateEmpty(button)
-        end
+        if State and State.UpdateButtonChecked then State.UpdateButtonChecked(button) end
+        if State and State.UpdateButtonEmpty then State.UpdateButtonEmpty(button) end
     end, module)
 end
 
