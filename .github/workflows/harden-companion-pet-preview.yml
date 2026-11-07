@@ -6,6 +6,7 @@ on:
       - codex/companion-petbar-snapshots
     paths:
       - '.github/workflows/harden-companion-pet-preview.yml'
+      - '.codex/fix_companion_pet_preview_fixture.py'
 
 permissions:
   contents: write
@@ -26,6 +27,7 @@ jobs:
         run: |
           set -euo pipefail
           python .codex/harden_companion_pet_preview.py
+          python .codex/fix_companion_pet_preview_fixture.py
           git diff --check
 
       - name: Audit preview ownership
@@ -38,6 +40,7 @@ jobs:
           pet = Path('modules/CompanionPetBar.lua').read_text()
           check = Path('check_lua.js').read_text()
           readme = Path('README.md').read_text()
+          fixture = Path('.codex/test_companion_pet_preview.lua').read_text()
 
           preview = pet.split('PreviewPetLayout = function', 1)[1].split('local function RefreshBlizzardPetBar', 1)[0]
           required = [
@@ -52,6 +55,8 @@ jobs:
 
           assert 'Managed pet action button preview capture failed' in check
           assert 'mover preview updates the same managed journal' in readme
+          assert 'ClampButtonSize = function(_, value)' in fixture
+          assert 'ClampSpacing = function(_, value)' in fixture
           print('Companion pet-bar preview ownership audit passed.')
           PY
 
