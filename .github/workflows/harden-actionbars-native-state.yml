@@ -1,0 +1,79 @@
+name: Harden ActionBars native state
+
+on:
+  push:
+    branches:
+      - codex/actionbars-config-purity
+    paths:
+      - '.github/workflows/harden-actionbars-native-state.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Apply ownership transform
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .codex/harden_actionbars_native_state.py
+          git diff --check
+
+      - name: Audit profile and native ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          shell = Path('modules/ActionBarsBlizzardShell.lua').read_text()
+          runtime = Path('modules/ActionBarsRuntime.lua').read_text()
+          check = Path('check_lua.js').read_text()
+
+          assert 'ImportSideBarStateFromBlizzard' not in shell
+          assert 'barsCfg[4].enabled =' not in shell
+          assert 'barsCfg[5].enabled =' not in shell
+          assert 'ab.autoHide =' not in runtime
+          assert 'CaptureNativeActionBarToggles' in shell
+          assert 'RestoreNativeActionBarToggles' in shell
+          assert 'implicit Blizzard-to-profile sidebar import' in check
+          print('ActionBars ownership audit passed.')
+          PY
+
+      - name: Run Lua ownership harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v lua5.1 >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y lua5.1
+          fi
+          lua5.1 .codex/test_actionbars_native_state.lua
+
+      - name: Validate addon
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm test
+
+      - name: Commit validated result
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .codex
+          rm -f .github/workflows/harden-actionbars-native-state.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Make ActionBars native takeover reversible" -m "Stop importing Blizzard side-bar state into the addon profile, keep runtime normalization read-only, snapshot native action-bar toggles before takeover, avoid redundant writes, and restore the exact baseline on detach. Release FeelsGoodUI 0.0.51."
+          git push origin HEAD:codex/actionbars-config-purity
