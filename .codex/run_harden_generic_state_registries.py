@@ -14,7 +14,7 @@ old_frame_transform = '''animate = replace_once(
     'Animate fade state creation',
 )
 '''
-new_frame_transform = '''animate = replace_once(
+new_frame_transform = """animate = replace_once(
     animate,
     '''local function PlayFade(frame, key, duration, fromAlpha, toAlpha, hideOnFinished, showOnStart)
     if not IsAnimFrame(frame) then
@@ -22,7 +22,7 @@ new_frame_transform = '''animate = replace_once(
     end
 
     local state = GetFrameState(frame)
-    local oppositeKey = (key == "fadeIn") and "fadeOut" or "fadeIn"
+    local oppositeKey = (key == \"fadeIn\") and \"fadeOut\" or \"fadeIn\"
 ''',
     '''local function PlayFade(frame, key, duration, fromAlpha, toAlpha, hideOnFinished, showOnStart)
     if not IsAnimFrame(frame) then
@@ -30,11 +30,11 @@ new_frame_transform = '''animate = replace_once(
     end
 
     local state = GetFrameState(frame, true)
-    local oppositeKey = (key == "fadeIn") and "fadeOut" or "fadeIn"
+    local oppositeKey = (key == \"fadeIn\") and \"fadeOut\" or \"fadeIn\"
 ''',
     'Animate fade state creation',
 )
-'''
+"""
 count = source.count(old_frame_transform)
 if count != 1:
     raise RuntimeError(f'Animate transform adapter anchor: expected 1, found {count}')
