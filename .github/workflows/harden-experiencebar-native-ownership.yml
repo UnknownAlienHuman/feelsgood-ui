@@ -1,0 +1,84 @@
+name: Harden ExperienceBar native ownership
+
+on:
+  push:
+    branches:
+      - codex/experiencebar-native-ownership
+    paths:
+      - '.github/workflows/harden-experiencebar-native-ownership.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Apply native ownership transform
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .codex/harden_experiencebar_native_ownership.py
+          git diff --check
+
+      - name: Audit lifecycle and frame ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path('modules/ExperienceBar.lua').read_text()
+          check = Path('check_lua.js').read_text()
+
+          assert 'SuppressBlizzardStatusTracking' in source
+          assert 'module._statusTrackingSnapshot' in source
+          assert 'MaintainStatusTrackingOwnership' in source
+          assert 'pcall(frame.Hide, frame)' not in source
+          assert 'pcall(manager.Show' not in source
+          assert 'function XP:Enable(' not in source
+          assert 'function XP:Disable(' not in source
+
+          init_body = source.split('function XP:Init()', 1)[1].split('\nend\n\nreturn XP', 1)[0]
+          assert 'ApplyConfig' not in init_body, 'Init must not perform lifecycle apply'
+          assert 'return true' in init_body
+          assert 'native status-frame Hide takeover' in check
+          assert 'parallel ExperienceBar lifecycle enable owner' in check
+          print('ExperienceBar lifecycle/native ownership audit passed.')
+          PY
+
+      - name: Run Lua ownership harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v lua5.1 >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y lua5.1
+          fi
+          lua5.1 .codex/test_experiencebar_native_ownership.lua
+
+      - name: Validate addon
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm test
+
+      - name: Commit validated result
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .codex
+          rm -f .github/workflows/harden-experiencebar-native-ownership.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Make ExperienceBar native takeover reversible" -m "Suppress Blizzard status tracking through captured alpha/mouse ownership without hiding foreign frames, restore only still-owned values, remove duplicate lifecycle enable/disable paths and first-attach double apply, and return explicit lifecycle results. Release FeelsGoodUI 0.0.55."
+          git push origin HEAD:codex/experiencebar-native-ownership
