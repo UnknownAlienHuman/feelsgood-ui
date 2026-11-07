@@ -6,6 +6,7 @@ on:
       - codex/generic-state-registries
     paths:
       - '.github/workflows/harden-generic-state-registries.yml'
+      - '.codex/run_harden_generic_state_registries.py'
 
 permissions:
   contents: write
@@ -25,7 +26,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python .codex/harden_generic_state_registries.py
+          python .codex/run_harden_generic_state_registries.py
           git diff --check
 
       - name: Audit generic ownership
