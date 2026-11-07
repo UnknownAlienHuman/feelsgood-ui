@@ -1,12 +1,13 @@
 name: Harden UnitFrames config purity
 
-# Re-run after switching the contract insertion to a unique structural anchor.
+# Re-run when the workflow or deterministic transform adapter changes.
 on:
   push:
     branches:
       - codex/unitframes-config-purity
     paths:
       - '.github/workflows/harden-unitframes-config-purity.yml'
+      - '.codex/run_harden_unitframes_config_purity.py'
 
 permissions:
   contents: write
