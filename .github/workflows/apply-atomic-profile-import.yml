@@ -1,6 +1,6 @@
 name: Apply atomic profile import
 
-# Triggered after every patch chunk has been staged on the branch.
+# Every staged patch fragment is verified against its expected Git blob SHA.
 on:
   push:
     branches:
