@@ -1,5 +1,8 @@
 name: Harden generic state registries
 
+# Deterministic one-shot build: transform current main-derived branch, run
+# ownership harnesses and the repository validator, then commit only product
+# code and permanent documentation. All bootstrap scripts/workflows are removed.
 on:
   push:
     branches:
@@ -57,13 +60,12 @@ jobs:
           for needle in required_animate:
               assert needle in animate, f'missing Animate registry contract: {needle}'
 
-          forbidden_animate = [
+          for needle in (
               '_fguiAnimateState',
               '_fguiAnimateTimers',
               'group._fguiFinalAlpha',
               'group._fguiHideOnFinished',
-          ]
-          for needle in forbidden_animate:
+          ):
               assert needle not in animate, f'generic animation metadata remains: {needle}'
 
           required_minimap = [
@@ -114,14 +116,18 @@ jobs:
           npm ci
           npm test
 
-      - name: Commit validated result
+      - name: Commit validated product diff
         shell: bash
         run: |
           set -euo pipefail
           rm -rf .codex
-          rm -f .github/workflows/harden-generic-state-registries.yml
+          rm -f \
+            .github/workflows/harden-generic-state-registries.yml \
+            .github/workflows/finalize-generic-state-registries.yml \
+            .github/workflows/recover-finalize-generic-state-registries.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
+          git diff --cached --check
           git commit -m "Move generic runtime state into registries" -m "Keep Animate fade/timer state and Minimap LibDBIcon hook state in weak-key addon registries, bind active drag to the exact button, and remove the dead arbitrary cooldown-frame cache helper. Release FeelsGoodUI 0.0.61."
           git push origin HEAD:codex/generic-state-registries
