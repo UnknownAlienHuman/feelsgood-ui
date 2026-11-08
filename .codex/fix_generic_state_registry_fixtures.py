@@ -9,6 +9,8 @@ replacements = {
         'assertEqual(Animate.CancelFade(untouched, 0.40), true, "cancel untouched frame")',
     'assertEqual(Animate.CancelAfter(owner, "zero"), false, "zero-delay has no timer handle")':
         'assertEqual(Animate.CancelAfter(owner, "zero"), true, "zero-delay callback token cancelled")',
+    'assertEqual(Animate.CancelAllAfter(owner), true, "cancel all timers")':
+        'Animate.CancelAllAfter(owner)',
 }
 for old, new in replacements.items():
     count = animate.count(old)
