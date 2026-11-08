@@ -329,24 +329,3 @@ function U.ResolveBarSpacing(spacing, maxSpacing)
     if v <= 1 then return 0 end
     return v
 end
-
-function U.GetCooldownTimerText(cooldownFrame, cacheField)
-    if not cooldownFrame then return nil end
-    cacheField = cacheField or "_fguiTimerText"
-
-    local cached = cooldownFrame[cacheField]
-    if cached and cached.GetObjectType and cached:GetObjectType() == "FontString" then
-        return cached
-    end
-
-    local regions = { cooldownFrame:GetRegions() }
-    for i = 1, #regions do
-        local region = regions[i]
-        if region and region.GetObjectType and region:GetObjectType() == "FontString" then
-            cooldownFrame[cacheField] = region
-            return region
-        end
-    end
-
-    return nil
-end

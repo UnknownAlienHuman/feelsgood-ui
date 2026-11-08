@@ -138,6 +138,16 @@ try {
         }
     }
 
+    assertSourceIncludes('core/Animate.lua', 'Animate._frameRegistry');
+    assertSourceIncludes('core/Animate.lua', 'Animate._timerRegistry');
+    assertSourceExcludes('core/Animate.lua', /_fguiAnimate(?:State|Timers)/, 'generic animation owner metadata');
+    assertSourceExcludes('core/Animate.lua', /group\._fgui/, 'animation-group metadata fields');
+    assertSourceExcludes('core/Utils.lua', /function U\.GetCooldownTimerText/, 'dead cooldown frame cache helper');
+    assertSourceIncludes('core/MinimapIcon.lua', 'local dragHookRegistry = setmetatable');
+    assertSourceIncludes('core/MinimapIcon.lua', 'local draggingButton = nil');
+    assertSourceExcludes('core/MinimapIcon.lua', /_fguiTransactionalDragHooked/, 'LibDBIcon button metadata');
+    assertSourceExcludes('core/MinimapIcon.lua', /local dragging = false/, 'global minimap drag boolean');
+
     assertSourceIncludes('modules/ActionBarsState.lua', 'State._buttonRegistry');
     assertSourceIncludes('modules/ActionBarsState.lua', 'function State.GetButtonRecord');
     assertSourceIncludes('modules/ActionBarsVisuals.lua', 'Visuals._regionRegistry');

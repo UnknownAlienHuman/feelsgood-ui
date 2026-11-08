@@ -4,7 +4,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 
 ## Retail 12.1.5 implementation status
 
-- [x] Target Interface `120105` and release `0.0.60`.
+- [x] Target Interface `120105` and release `0.0.61`.
 - [x] Gate Secret/Restricted Values before Lua inspection, conversion, comparison, or formatting.
 - [x] Integrate restricted Unit Frame and Center Bar handling into the canonical render/target owners; remove late method overrides and duplicate producer calls.
 - [x] Keep opaque power/text on exact native sinks where available; otherwise render an explicit unavailable state.
@@ -30,6 +30,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 - [x] Move Companion hooks/count caches/summaries off Blizzard frames and make PetBar/MicroBags apply result-aware; failed layers clean partial presentation, while transient PetActionButton creation queues an event-driven retry instead of disabling Companion.
 - [x] Journal PetActionButton takeover in `CompanionPetState`: separate structural layout from dynamic visibility ownership, reopen snapshots on component replacement, journal mover preview, refuse unreadable mutable components, and restore exact still-owned texture/text/cooldown/native-bar-alpha state.
 - [x] Move ActionBars runtime metadata off Blizzard ActionButton/FontString/Cooldown objects into weak-key button/region registries; hooks resolve current owner/layers through the registry and no callback/style cache is stored on foreign frames.
+- [x] Remove generic caller-object metadata: Animate fade/timer state and Minimap LibDBIcon hook state live in weak registries, active drag is button-specific, and the unused arbitrary cooldown-frame cache helper is deleted.
 
 ## Required in-game validation
 
@@ -39,7 +40,8 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 - [ ] Remove a core/feature section after DB initialization, then open Theme, Safety, Minimap, QA, Movers, ActionBars, CenterBars, Companion and their settings panels; readers must not recreate the section, while one explicit `EnsureSection`/Settings normalization repairs it.
 - [ ] Toggle debug and perf from both General settings and slash commands; profile, runtime state, and `Undo last` stay identical after success and rollback.
 - [ ] Run `/fgui aura mini|classic`; UnitFrames apply executes through the normal queue and a forced failure restores the prior mode/history.
-- [ ] Show/hide/reset and drag the minimap icon from settings and slash commands; OnUpdate performs zero SavedVariables writes, drag stop creates one undoable transaction, no-op drag creates none, and failed apply/cancel restores the persisted position.
+- [ ] Show/hide/reset and drag the minimap icon from settings and slash commands; OnUpdate performs zero SavedVariables writes, each LibDBIcon button is hooked once without foreign metadata, stale-button stop events are inert, drag stop creates one undoable transaction, and failed apply/cancel restores the persisted position.
+- [ ] Exercise repeated ExperienceBar fades and keyed timer replacement/cancellation; frame/owner tables receive no `_fguiAnimate*` fields, animation groups are reused, stale callbacks remain invalidated, and terminal alpha/visibility is exact.
 - [ ] Import a valid profile both in and out of combat; the UI reports queued status until all apply owners finish, old history is removed only after commit, and a forced late failure restores the previous profile while preserving newer edits.
 - [ ] Attempt import while another settings transaction or import is pending; the live profile, runtime state, and undo history remain untouched.
 - [ ] Start an import that remains combat-deferred, then `/reload` or log out before commit; next startup restores the previous profile and overlays any newer post-import edits, then removes the recovery record.

@@ -13,6 +13,11 @@ local EPSILON = 0.001
 local abs = math.abs
 local max = math.max
 
+Animate._frameRegistry = Animate._frameRegistry or setmetatable({}, { __mode = "k" })
+Animate._timerRegistry = Animate._timerRegistry or setmetatable({}, { __mode = "k" })
+local FrameRegistry = Animate._frameRegistry
+local TimerRegistry = Animate._timerRegistry
+
 local function ClampDuration(duration, fallback)
     local d = tonumber(duration)
     if type(d) ~= "number" then
@@ -46,13 +51,11 @@ local function StopGroup(group)
     end
 end
 
-local function GetFrameState(frame)
-    local state = frame and frame._fguiAnimateState
-    if type(state) ~= "table" then
+local function GetFrameState(frame, create)
+    local state = frame and FrameRegistry[frame] or nil
+    if not state and create == true and frame then
         state = {}
-        if frame then
-            frame._fguiAnimateState = state
-        end
+        FrameRegistry[frame] = state
     end
     return state
 end
@@ -69,10 +72,9 @@ local function EnsureFadeGroup(frame, state, key)
     state[key .. "Alpha"] = alpha
 
     group:SetScript("OnFinished", function()
-        if group._fguiFinalAlpha ~= nil then
-            frame:SetAlpha(group._fguiFinalAlpha)
-        end
-        if group._fguiHideOnFinished == true and type(frame.Hide) == "function" then
+        local finalAlpha = state[key .. "FinalAlpha"]
+        if finalAlpha ~= nil then frame:SetAlpha(finalAlpha) end
+        if state[key .. "HideOnFinished"] == true and type(frame.Hide) == "function" then
             frame:Hide()
         end
     end)
@@ -85,7 +87,7 @@ local function PlayFade(frame, key, duration, fromAlpha, toAlpha, hideOnFinished
         return false
     end
 
-    local state = GetFrameState(frame)
+    local state = GetFrameState(frame, true)
     local oppositeKey = (key == "fadeIn") and "fadeOut" or "fadeIn"
     StopGroup(state[oppositeKey])
 
@@ -112,8 +114,8 @@ local function PlayFade(frame, key, duration, fromAlpha, toAlpha, hideOnFinished
     alpha:SetDuration(d)
     alpha:SetFromAlpha(fromAlpha)
     alpha:SetToAlpha(toAlpha)
-    group._fguiFinalAlpha = toAlpha
-    group._fguiHideOnFinished = (hideOnFinished == true)
+    state[key .. "FinalAlpha"] = toAlpha
+    state[key .. "HideOnFinished"] = (hideOnFinished == true)
     group:Play()
     return true
 end
@@ -123,9 +125,11 @@ function Animate.CancelFade(frame, resetAlpha)
         return false
     end
 
-    local state = GetFrameState(frame)
-    StopGroup(state.fadeIn)
-    StopGroup(state.fadeOut)
+    local state = GetFrameState(frame, false)
+    if state then
+        StopGroup(state.fadeIn)
+        StopGroup(state.fadeOut)
+    end
 
     if resetAlpha ~= nil then
         frame:SetAlpha(ResolveAlpha(resetAlpha, frame:GetAlpha() or 1))
@@ -187,10 +191,10 @@ end
 
 local function GetTimerState(owner)
     local host = (type(owner) == "table") and owner or Animate
-    local state = host._fguiAnimateTimers
-    if type(state) ~= "table" then
+    local state = TimerRegistry[host]
+    if not state then
         state = { entries = {}, tokens = {} }
-        host._fguiAnimateTimers = state
+        TimerRegistry[host] = state
     end
     return host, state
 end
@@ -231,7 +235,7 @@ function Animate.After(owner, key, delay, callback)
     tokens[key] = token
 
     local function Run()
-        local current = host._fguiAnimateTimers
+        local current = TimerRegistry[host]
         if type(current) ~= "table" then
             return
         end
