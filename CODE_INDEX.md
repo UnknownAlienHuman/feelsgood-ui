@@ -7,11 +7,12 @@
 | `core/Bootstrap.lua`, `core/Events.lua`, `core/Lifecycle.lua`, `core/App.lua` | Namespace, lifecycle, event handling, and feature orchestration, including pre-enable recovery of interrupted native ActionBars takeover. |
 | `core/DB.lua`, `core/Schema.lua`, `core/Settings.lua`, `core/Apply.lua` | Saved variables, migrations, pure `ReadSection` vs explicit `EnsureSection`, validated setting writes, apply ordering, and runtime restoration. |
 | `core/RuntimeSettings.lua` | Canonical apply owner for general runtime state: logging level and performance overlay. |
+| `core/Animate.lua`, `core/Utils.lua` | Weak-key fade/timer ownership and stateless shared helpers without caller-object cache fields. |
 | `core/Media.lua` | Media lookup, icon crop/font helpers, and weak-key border ownership without foreign-frame metadata. |
 | `core/MoversTransactions.lua` | Pure mover write builders, runtime-only position/geometry preview, one-shot Settings commits, and preview restoration after failure/cancel. |
 | `core/PanelTransactions.lua` | Ordered `SetTx`/undo/reset/profile-replacement journal, ownership-aware rollback, multi-key commit tracking, history repair, and terminal callbacks. |
 | `core/ProfileImport.lua`, `core/ProfileTransfer.lua` | Bounded decode/export UI, detached normalization, profile-wide atomic commit/rollback, and durable recovery for interrupted imports. |
-| `core/MinimapIcon.lua` | LibDBIcon runtime proxy, terminal drag-position transaction, visibility apply owner, and rollback reconciliation. |
+| `core/MinimapIcon.lua` | LibDBIcon runtime proxy, weak-key button-hook ownership, exact active-drag owner, terminal position transaction, and rollback reconciliation. |
 | `core/Options*.lua`, `core/Movers*.lua`, `core/Commands.lua` | Settings pages, frame editing/movement UI, and command adapters over Settings/Apply. |
 | `core/FeatureRegistry.lua` | Feature definitions and apply order. |
 | `modules/UnitFramesPolicy.lua` | Read-only UnitFrames configuration/cache policy, immutable fallbacks, and transactional mover write builders. |

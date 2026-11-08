@@ -21,7 +21,9 @@ local PANEL_KEY = "general"
 local dataObj
 local isRegistered = false
 local runtimeCfg = {}
-local dragging = false
+local draggingButton = nil
+local dragHookRegistry = setmetatable({}, { __mode = "k" })
+MinimapIcon._dragHookRegistry = dragHookRegistry
 
 local function GetCfg()
     local config = DB and DB.ReadSection and DB:ReadSection("minimap")
@@ -124,28 +126,39 @@ local function EnsureDragHooks()
     if not (button and type(button.HookScript) == "function") then
         return false
     end
-    if button._fguiTransactionalDragHooked then
-        return true
+
+    local record = dragHookRegistry[button]
+    if not record then
+        record = {}
+        dragHookRegistry[button] = record
     end
 
-    button._fguiTransactionalDragHooked = true
-    button:HookScript("OnDragStart", function()
-        dragging = true
-    end)
-    button:HookScript("OnDragStop", function()
-        if not dragging then return end
-        dragging = false
-
-        local ok, err = xpcall(CommitDraggedPosition, function(reason)
-            return tostring(reason or "unknown minimap drag commit error")
+    if not record.startHooked then
+        local ok = pcall(button.HookScript, button, "OnDragStart", function(startedButton)
+            draggingButton = startedButton
         end)
-        if not ok then
-            RestoreRuntimeFromProfile()
-            if Log and type(Log.Error) == "function" then
-                Log:Error("Minimap drag commit failed: " .. tostring(err))
+        if not ok then return false end
+        record.startHooked = true
+    end
+
+    if not record.stopHooked then
+        local ok = pcall(button.HookScript, button, "OnDragStop", function(stoppedButton)
+            if draggingButton ~= stoppedButton then return end
+            draggingButton = nil
+
+            local committed, err = xpcall(CommitDraggedPosition, function(reason)
+                return tostring(reason or "unknown minimap drag commit error")
+            end)
+            if not committed then
+                RestoreRuntimeFromProfile()
+                if Log and type(Log.Error) == "function" then
+                    Log:Error("Minimap drag commit failed: " .. tostring(err))
+                end
             end
-        end
-    end)
+        end)
+        if not ok then return false end
+        record.stopHooked = true
+    end
     return true
 end
 
@@ -184,12 +197,12 @@ end
 
 function MinimapIcon:Detach()
     if LDBIcon and isRegistered then
-        if dragging and type(LDBIcon.GetMinimapButton) == "function" then
-            local button = LDBIcon:GetMinimapButton(addonName)
-            if button and type(button.SetScript) == "function" then
-                button:SetScript("OnUpdate", nil)
+        local activeButton = draggingButton
+        if activeButton then
+            if type(activeButton.SetScript) == "function" then
+                activeButton:SetScript("OnUpdate", nil)
             end
-            dragging = false
+            draggingButton = nil
             RestoreRuntimeFromProfile()
         end
         LDBIcon:Hide(addonName)
@@ -207,7 +220,7 @@ function MinimapIcon:ApplyConfig()
         return false, "Minimap config unavailable"
     end
 
-    if dragging then
+    if draggingButton then
         return false, "Minimap apply blocked while icon drag is active"
     end
 
