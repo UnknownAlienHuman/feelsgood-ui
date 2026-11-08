@@ -5,6 +5,8 @@ animate = animate_path.read_text(encoding='utf-8')
 replacements = {
     'assertEqual(Animate.CancelFade(frame, { resetAlpha = 0.55 }), true, "cancel fade")':
         'assertEqual(Animate.CancelFade(frame, 0.55), true, "cancel fade")',
+    'assertEqual(Animate.CancelFade(untouched, { resetAlpha = 0.40 }), true, "cancel untouched frame")':
+        'assertEqual(Animate.CancelFade(untouched, 0.40), true, "cancel untouched frame")',
     'assertEqual(Animate.CancelAfter(owner, "zero"), false, "zero-delay has no timer handle")':
         'assertEqual(Animate.CancelAfter(owner, "zero"), true, "zero-delay callback token cancelled")',
 }
