@@ -6,7 +6,7 @@ on:
       - codex/experiencebar-native-journal
     paths:
       - '.github/workflows/harden-experiencebar-native-journal.yml'
-      - '.codex/experiencebar.transform.py.gz.b64'
+      - '.codex/parts/experiencebar.transform.part*.b64'
 
 permissions:
   contents: write
@@ -26,7 +26,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          base64 --decode .codex/experiencebar.transform.py.gz.b64 | gzip --decompress > /tmp/harden_experiencebar_native_journal.py
+          cat .codex/parts/experiencebar.transform.part*.b64 | base64 --decode | gzip --decompress > /tmp/harden_experiencebar_native_journal.py
           base64 --decode .codex/experiencebar.harness.lua.gz.b64 | gzip --decompress > /tmp/test_experiencebar_native_journal.lua
           echo "d776c7a9ed2caf33c72d7a8049c17ba86b81de078b8d53109791652a352b5553  /tmp/harden_experiencebar_native_journal.py" | sha256sum --check -
           echo "9f04eb4351dd4fa6bcb34bca10f3a6e65488ef01780c8d3e26b752c71f8e1cc9  /tmp/test_experiencebar_native_journal.lua" | sha256sum --check -
