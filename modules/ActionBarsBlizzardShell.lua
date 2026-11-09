@@ -32,6 +32,76 @@ local BLIZZARD_ART_FRAME_NAMES = {
 }
 
 Shell._blizzardArtStates = Shell._blizzardArtStates or {}
+Shell._secureHookRegistry = Shell._secureHookRegistry or setmetatable({}, { __mode = "k" })
+Shell._scriptHookRegistry = Shell._scriptHookRegistry or setmetatable({}, { __mode = "k" })
+Shell._globalHookState = Shell._globalHookState or {}
+local SecureHookRegistry = Shell._secureHookRegistry
+local ScriptHookRegistry = Shell._scriptHookRegistry
+local GlobalHookState = Shell._globalHookState
+
+local function GetHookRecord(registry, target, create)
+    if type(target) ~= "table" then return nil end
+    local record = registry[target]
+    if not record and create then
+        record = {}
+        registry[target] = record
+    end
+    return record
+end
+
+local function EnsureSecureMethodHook(target, method, callback)
+    local record = GetHookRecord(SecureHookRegistry, target, true)
+    if not record then return false, "Invalid secure hook target" end
+    if record[method] == true then return true end
+
+    local secureHook = _G.hooksecurefunc or hooksecurefunc
+    if type(secureHook) ~= "function" then
+        return false, "hooksecurefunc unavailable"
+    end
+
+    local ok, detail = pcall(secureHook, target, method, callback)
+    if not ok then
+        record[method .. "Error"] = tostring(detail)
+        return false, tostring(detail)
+    end
+    record[method] = true
+    record[method .. "Error"] = nil
+    return true
+end
+
+local function EnsureScriptHook(target, event, callback)
+    local record = GetHookRecord(ScriptHookRegistry, target, true)
+    if not record then return false, "Invalid script hook target" end
+    if record[event] == true then return true end
+    if type(target.HookScript) ~= "function" then
+        return false, tostring(event) .. " HookScript unavailable"
+    end
+
+    local ok, detail = pcall(target.HookScript, target, event, callback)
+    if not ok then
+        record[event .. "Error"] = tostring(detail)
+        return false, tostring(detail)
+    end
+    record[event] = true
+    record[event .. "Error"] = nil
+    return true
+end
+
+function Shell.SetHookOwner(module)
+    if type(module) ~= "table" or module._detached == true then
+        return false, "ActionBars shell hook owner unavailable"
+    end
+    GlobalHookState.owner = module
+    return true
+end
+
+function Shell.ReleaseHookOwner(module)
+    if GlobalHookState.owner == module then
+        GlobalHookState.owner = nil
+        return true
+    end
+    return false
+end
 
 ns._abPastebin = ns._abPastebin or CreateFrame("Frame")
 ns._abPastebin:Hide()
@@ -552,68 +622,83 @@ function Shell.EnsureBlizzardMultiBars(module, barsCfg, hideBlizzardOverride)
     return true
 end
 
-function Shell.EnsureEndCapsHook(module)
-    if type(module) ~= "table" or module._endCapsHooked then
+local function ActiveShellHookOwner()
+    local module = GlobalHookState.owner
+    if IsDetached(module) then return nil end
+    return module
+end
+
+local function OnEndCapsUpdated()
+    local module = ActiveShellHookOwner()
+    if module and Shell.ShouldHideBlizzardArt() then
+        Shell.KickHideBlizzardArt(module)
+    end
+end
+
+local function RepairSettingsShell()
+    local module = ActiveShellHookOwner()
+    if not module or type(module.ApplyConfig) ~= "function" then return end
+    if InCombat() then
+        module._pending = true
         return
     end
+    module:ApplyConfig()
+end
 
-    local function Rehide()
-        if IsDetached(module) then
-            return
-        end
-        if Shell.ShouldHideBlizzardArt() then
-            Shell.KickHideBlizzardArt(module)
-        end
+function Shell.EnsureEndCapsHook(module)
+    if type(module) ~= "table" then
+        return false, "ActionBars shell hook owner unavailable"
     end
 
     local mainActionBarMixin = _G.MainActionBarMixin
     if type(mainActionBarMixin) == "table" and type(mainActionBarMixin.UpdateEndCaps) == "function" then
-        hooksecurefunc(mainActionBarMixin, "UpdateEndCaps", Rehide)
-        module._endCapsHooked = "MainActionBarMixin.UpdateEndCaps"
-        return
+        local ok, detail = EnsureSecureMethodHook(mainActionBarMixin, "UpdateEndCaps", OnEndCapsUpdated)
+        if not ok then
+            return false, "MainActionBarMixin.UpdateEndCaps: " .. tostring(detail)
+        end
+        return true
     end
 
     if type(_G.MainMenuBarArtFrame_UpdateEndCaps) == "function" then
-        hooksecurefunc(_G, "MainMenuBarArtFrame_UpdateEndCaps", Rehide)
-        module._endCapsHooked = "MainMenuBarArtFrame_UpdateEndCaps"
+        local ok, detail = EnsureSecureMethodHook(_G, "MainMenuBarArtFrame_UpdateEndCaps", OnEndCapsUpdated)
+        if not ok then
+            return false, "MainMenuBarArtFrame_UpdateEndCaps: " .. tostring(detail)
+        end
     end
+    return true
 end
 
 function Shell.EnsureSettingsHooks(module)
     if type(module) ~= "table" then
-        return false
+        return false, "ActionBars settings hook owner unavailable"
     end
 
-    if type(module._settingsShellRepair) ~= "function" then
-        module._settingsShellRepair = function()
-            local activeModule = ns.ActionBars or module
-            if not activeModule or activeModule._detached == true or type(activeModule.ApplyConfig) ~= "function" then
-                return
-            end
-            if InCombat() then
-                activeModule._pending = true
-                return
-            end
-            activeModule:ApplyConfig()
+    local firstDetail
+    local settingsPanel = _G.SettingsPanel
+    if type(settingsPanel) == "table" and type(settingsPanel.HookScript) == "function" then
+        local ok, detail = EnsureScriptHook(settingsPanel, "OnHide", RepairSettingsShell)
+        if not ok then
+            firstDetail = firstDetail or ("SettingsPanel.OnHide: " .. tostring(detail))
         end
     end
 
-    if (not module._settingsPanelHooked)
-        and type(_G.SettingsPanel) == "table"
-        and type(_G.SettingsPanel.HookScript) == "function" then
-        _G.SettingsPanel:HookScript("OnHide", module._settingsShellRepair)
-        module._settingsPanelHooked = true
-    end
-
     local settingsMixin = _G.SettingsPanelMixin
-    if (not module._settingsTransitionHooked)
-        and type(settingsMixin) == "table"
-        and type(settingsMixin.TransitionBackOpeningPanel) == "function" then
-        hooksecurefunc(settingsMixin, "TransitionBackOpeningPanel", module._settingsShellRepair)
-        module._settingsTransitionHooked = true
+    if type(settingsMixin) == "table" and type(settingsMixin.TransitionBackOpeningPanel) == "function" then
+        local ok, detail = EnsureSecureMethodHook(
+            settingsMixin,
+            "TransitionBackOpeningPanel",
+            RepairSettingsShell
+        )
+        if not ok then
+            firstDetail = firstDetail
+                or ("SettingsPanelMixin.TransitionBackOpeningPanel: " .. tostring(detail))
+        end
     end
 
-    return module._settingsPanelHooked == true or module._settingsTransitionHooked == true
+    if firstDetail then
+        return false, "ActionBars settings hook registration failed: " .. firstDetail
+    end
+    return true
 end
 
 return Shell

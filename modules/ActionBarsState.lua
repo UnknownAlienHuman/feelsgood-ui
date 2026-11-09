@@ -13,6 +13,61 @@ State._holderRegistry = State._holderRegistry or setmetatable({}, { __mode = "k"
 local ButtonRegistry = State._buttonRegistry
 local HolderRegistry = State._holderRegistry
 
+State._secureHookRegistry = State._secureHookRegistry or setmetatable({}, { __mode = "k" })
+State._globalHookState = State._globalHookState or {}
+local SecureHookRegistry = State._secureHookRegistry
+local GlobalHookState = State._globalHookState
+
+local function GetSecureHookRecord(target, create)
+    if type(target) ~= "table" then return nil end
+    local record = SecureHookRegistry[target]
+    if not record and create then
+        record = {}
+        SecureHookRegistry[target] = record
+    end
+    return record
+end
+
+local function EnsureSecureMethodHook(target, method, callback)
+    if type(target) ~= "table" or type(method) ~= "string" or type(callback) ~= "function" then
+        return false, "Invalid secure hook registration"
+    end
+
+    local record = GetSecureHookRecord(target, true)
+    if record[method] == true then return true end
+
+    local secureHook = _G.hooksecurefunc or hooksecurefunc
+    if type(secureHook) ~= "function" then
+        return false, "hooksecurefunc unavailable"
+    end
+
+    local ok, detail = pcall(secureHook, target, method, callback)
+    if not ok then
+        record[method .. "Error"] = tostring(detail)
+        return false, tostring(detail)
+    end
+
+    record[method] = true
+    record[method .. "Error"] = nil
+    return true
+end
+
+function State.SetStateHookOwner(module)
+    if type(module) ~= "table" or module._detached == true then
+        return false, "ActionBars state hook owner unavailable"
+    end
+    GlobalHookState.owner = module
+    return true
+end
+
+function State.ReleaseStateHookOwner(module)
+    if GlobalHookState.owner == module then
+        GlobalHookState.owner = nil
+        return true
+    end
+    return false
+end
+
 local function GetHolderRecord(holder, create)
     if not holder then return nil end
     local record = HolderRegistry[holder]
@@ -530,73 +585,103 @@ local function RunButtonVisualSync(module, btn, updateChecked, updateEmpty)
     if updateEmpty then UpdateEmptySlot(btn) end
 end
 
-function State.EnsureStateHooks(module)
-    if type(module) ~= "table" or module._stateHooksAttached then
-        return
+local function ActiveStateHookOwner()
+    local module = GlobalHookState.owner
+    if IsDetached(module) then return nil end
+    return module
+end
+
+local function OnActionButtonUpdateState(btn)
+    local module = ActiveStateHookOwner()
+    if module then RunButtonVisualSync(module, btn, true, true) end
+end
+
+local function OnActionButtonUpdateUsable(btn)
+    local module = ActiveStateHookOwner()
+    if module then RunButtonVisualSync(module, btn, false, true) end
+end
+
+local function OnActionButtonUpdateAction(btn)
+    local module = ActiveStateHookOwner()
+    if module then RunButtonVisualSync(module, btn, true, true) end
+end
+
+local function OnBaseActionButtonShowGrid(btn)
+    local module = ActiveStateHookOwner()
+    if module then UpdateEmptySlot(btn) end
+end
+
+local function OnMoversUnlocked()
+    local module = ActiveStateHookOwner()
+    if not module then return end
+    State.RefreshEmptySlots(module)
+    State.UpdateAutoHideState(module)
+end
+
+local function OnSpellAlertShown(_, btn)
+    local module = ActiveStateHookOwner()
+    if not module or not btn then return end
+
+    local record = GetButtonRecord(btn, false)
+    local pressed = record and record.layers and record.layers.pressed
+    if pressed then pressed:Show() end
+
+    local overlay = btn.SpellActivationAlert or btn.overlay
+    if overlay and overlay.SetAlpha then
+        overlay:SetAlpha(0)
+        if overlay.Hide then overlay:Hide() end
+    end
+end
+
+local function OnSpellAlertHidden(_, btn)
+    local module = ActiveStateHookOwner()
+    if not module then return end
+
+    local record = GetButtonRecord(btn, false)
+    local pressed = record and record.layers and record.layers.pressed
+    if pressed then pressed:Hide() end
+end
+
+function State.EnsureStateHooks(module, hasActionChangedCallback)
+    if type(module) ~= "table" then
+        return false, "ActionBars state hook owner unavailable"
     end
 
-    module._stateHooksAttached = true
+    local firstDetail
+
+    local function Ensure(target, method, callback, label)
+        if type(target) ~= "table" or type(target[method]) ~= "function" then
+            return true
+        end
+        local ok, detail = EnsureSecureMethodHook(target, method, callback)
+        if not ok then
+            firstDetail = firstDetail or (tostring(label) .. ": " .. tostring(detail))
+        end
+        return ok
+    end
 
     local actionButtonMixin = _G.ActionBarActionButtonMixin
-    if type(actionButtonMixin) == "table" then
-        if type(actionButtonMixin.UpdateState) == "function" then
-            hooksecurefunc(actionButtonMixin, "UpdateState", function(btn)
-                RunButtonVisualSync(module, btn, true, true)
-            end)
-        end
-        if type(actionButtonMixin.UpdateUsable) == "function" then
-            hooksecurefunc(actionButtonMixin, "UpdateUsable", function(btn)
-                RunButtonVisualSync(module, btn, false, true)
-            end)
-        end
-    end
-
-    local hasActionChangedCallback = _G.EventRegistry and type(_G.EventRegistry.RegisterCallback) == "function"
-    if (not hasActionChangedCallback) and type(actionButtonMixin) == "table" and type(actionButtonMixin.UpdateAction) == "function" then
-        hooksecurefunc(actionButtonMixin, "UpdateAction", function(btn)
-            RunButtonVisualSync(module, btn, true, true)
-        end)
+    Ensure(actionButtonMixin, "UpdateState", OnActionButtonUpdateState, "ActionBarActionButtonMixin.UpdateState")
+    Ensure(actionButtonMixin, "UpdateUsable", OnActionButtonUpdateUsable, "ActionBarActionButtonMixin.UpdateUsable")
+    if hasActionChangedCallback ~= true then
+        Ensure(actionButtonMixin, "UpdateAction", OnActionButtonUpdateAction, "ActionBarActionButtonMixin.UpdateAction")
     end
 
     local baseActionButtonMixin = _G.BaseActionButtonMixin
-    if type(baseActionButtonMixin) == "table" and type(baseActionButtonMixin.SetShowGrid) == "function" then
-        hooksecurefunc(baseActionButtonMixin, "SetShowGrid", function(btn)
-            if IsDetached(module) then return end
-            UpdateEmptySlot(btn)
-        end)
-    end
+    Ensure(baseActionButtonMixin, "SetShowGrid", OnBaseActionButtonShowGrid, "BaseActionButtonMixin.SetShowGrid")
 
     if Movers and type(Movers.SetUnlocked) == "function" then
-        hooksecurefunc(Movers, "SetUnlocked", function()
-            if IsDetached(module) then return end
-            State.RefreshEmptySlots(module)
-            State.UpdateAutoHideState(module)
-        end)
+        Ensure(Movers, "SetUnlocked", OnMoversUnlocked, "Movers.SetUnlocked")
     end
 
     local spellAlertManager = _G.ActionButtonSpellAlertManager
-    if type(spellAlertManager) == "table" and type(spellAlertManager.ShowAlert) == "function" then
-        hooksecurefunc(spellAlertManager, "ShowAlert", function(_, btn)
-            if IsDetached(module) or not btn then return end
-            local record = GetButtonRecord(btn, false)
-            local pressed = record and record.layers and record.layers.pressed
-            if pressed then pressed:Show() end
-            local overlay = btn.SpellActivationAlert or btn.overlay
-            if overlay and overlay.SetAlpha then
-                overlay:SetAlpha(0)
-                if overlay.Hide then overlay:Hide() end
-            end
-        end)
-    end
+    Ensure(spellAlertManager, "ShowAlert", OnSpellAlertShown, "ActionButtonSpellAlertManager.ShowAlert")
+    Ensure(spellAlertManager, "HideAlert", OnSpellAlertHidden, "ActionButtonSpellAlertManager.HideAlert")
 
-    if type(spellAlertManager) == "table" and type(spellAlertManager.HideAlert) == "function" then
-        hooksecurefunc(spellAlertManager, "HideAlert", function(_, btn)
-            if IsDetached(module) then return end
-            local record = GetButtonRecord(btn, false)
-            local pressed = record and record.layers and record.layers.pressed
-            if pressed then pressed:Hide() end
-        end)
+    if firstDetail then
+        return false, "ActionBars state hook registration failed: " .. firstDetail
     end
+    return true
 end
 
 function State.RefreshEmptySlots(module)

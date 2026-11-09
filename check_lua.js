@@ -173,6 +173,36 @@ try {
 
     assertSourceIncludes('modules/ActionBarsState.lua', 'State._buttonRegistry');
     assertSourceIncludes('modules/ActionBarsState.lua', 'State._holderRegistry');
+    assertSourceIncludes('modules/ActionBarsState.lua', 'State._secureHookRegistry');
+    assertSourceIncludes('modules/ActionBarsState.lua', 'function State.SetStateHookOwner(module)');
+    assertSourceIncludes('modules/ActionBarsBlizzardShell.lua', 'function Shell.SetHookOwner(module)');
+    assertSourceIncludes('modules/ActionBarsRuntime.lua', 'Runtime._callbackOwner = nil');
+    assertSourceIncludes('modules/ActionBarsRuntime.lua', 'Runtime._callbackRecord = nil');
+    assertSourceIncludes('modules/ActionBarsRuntime.lua', 'local function DispatchActionChanged(record, _, button)');
+    assertSourceIncludes('modules/ActionBarsRuntime.lua', 'record.active == true and Runtime._callbackRecord == record');
+    assertSourceIncludes('modules/ActionBarsRuntime.lua', 'callbackRecord.active = false');
+    assertSourceIncludes('modules/ActionBarsRuntime.lua', 'module._callbackHandles = nil');
+    assertSourceExcludes('modules/ActionBarsRuntime.lua', /RegisterCallback[\s\S]{0,500}OnActionChanged,\s*module/, 'unguarded ActionBars callback registration');
+
+    assertSourceIncludes('modules/ActionBarsRuntime.lua', 'local activeModule = Runtime._callbackOwner');
+    assertSourceIncludes('modules/ActionBarsRuntime.lua', 'if not IsReady(activeModule) or IsDetached(activeModule) then return end');
+    assertSourceIncludes('modules/ActionBarsRuntime.lua', 'local ownerOK, ownerDetail = State.SetStateHookOwner(module)');
+    assertSourceIncludes('modules/ActionBarsRuntime.lua', 'local ownerOK, ownerDetail = Shell.SetHookOwner(module)');
+    assertSourceExcludes('modules/ActionBarsState.lua', /function State\.EnsureStateHooks[\s\S]*?GlobalHookState\.owner\s*=\s*module/, 'pre-success ActionBars state owner publication');
+    assertSourceExcludes('modules/ActionBarsBlizzardShell.lua', /function Shell\.Ensure(?:EndCapsHook|SettingsHooks)[\s\S]*?GlobalHookState\.owner\s*=\s*module/, 'pre-success ActionBars shell owner publication');
+
+    assertSourceIncludes('modules/ActionBarsState.lua', 'State.ReleaseStateHookOwner');
+    assertSourceIncludes('modules/ActionBarsState.lua', 'GlobalHookState.owner = module');
+    assertSourceIncludes('modules/ActionBarsBlizzardShell.lua', 'Shell._secureHookRegistry');
+    assertSourceIncludes('modules/ActionBarsBlizzardShell.lua', 'Shell._scriptHookRegistry');
+    assertSourceIncludes('modules/ActionBarsBlizzardShell.lua', 'Shell.ReleaseHookOwner');
+    assertSourceIncludes('modules/ActionBarsRuntime.lua', 'local registeredOK, registeredDetail = pcall');
+    assertSourceIncludes('modules/ActionBarsRuntime.lua', 'local initOK, initDetail = Runtime.Init(module)');
+    assertSourceExcludes('modules/ActionBarsState.lua', /_stateHooksAttached/, 'pre-published ActionBars global-hook summary');
+    assertSourceExcludes('modules/ActionBarsBlizzardShell.lua', /_endCapsHooked|_settingsPanelHooked|_settingsTransitionHooked|_settingsShellRepair/, 'module-local ActionBars shell hook metadata');
+    assertSourceExcludes('modules/ActionBarsRuntime.lua', /_actionChangedCallbackRegistered\s*=\s*true\s*\n\s*module\._callbackHandles:RegisterCallback/, 'pre-published ActionBars callback registration');
+    assertSourceExcludes('modules/ActionBarsRuntime.lua', /module\._initDone\s*=\s*true[\s\S]{0,120}EnsureStateHooks/, 'pre-published ActionBars initialization');
+
     assertSourceIncludes('modules/ActionBarsState.lua', 'local function EnsureScriptHook');
     assertSourceIncludes('modules/ActionBarsState.lua', 'OnButtonAutoHideEdge');
     assertSourceIncludes('modules/ActionBarsState.lua', 'OnHolderAutoHideEdge');

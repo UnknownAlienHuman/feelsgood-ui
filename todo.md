@@ -4,7 +4,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 
 ## Retail 12.1.5 implementation status
 
-- [x] Target Interface `120105` and release `0.0.66`.
+- [x] Target Interface `120105` and release `0.0.67`.
 - [x] Gate Secret/Restricted Values before Lua inspection, conversion, comparison, or formatting.
 - [x] Integrate restricted Unit Frame and Center Bar handling into the canonical render/target owners; remove late method overrides and duplicate producer calls.
 - [x] Keep opaque power/text on exact native sinks where available; otherwise render an explicit unavailable state.
@@ -34,6 +34,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 - [x] Remove generic caller-object metadata: Animate fade/timer state and Minimap LibDBIcon hook state live in weak registries, active drag is button-specific, and the unused arbitrary cooldown-frame cache helper is deleted.
 - [x] Move Options adaptive-width, numeric-sync, wheel-proxy, and Edit Mode mover-listener ownership into weak registries; publish each hook edge only after successful registration and retry partial failures without widget/panel markers.
 - [x] Make ActionBars holder/button auto-hide and state-layer hooks result-bearing: weak registries own state, callbacks resolve current owners, partial failures retry only missing edges, and visual/apply callers propagate failure.
+- [x] Make ActionBars permanent state, EndCaps, SettingsPanel and action-change hooks result-bearing: weak target/method registries prevent duplicates, partial hooks stay inert until full init publishes active owners, init/callback flags publish after success, callback generations make stale handles inert before cleanup, owner replacement is dynamic, and detach releases owners/handles.
 - [x] Move UnitFrames target observers, aura roles, header-hook state, low-health cache and unit-watch ownership off oUF frames/elements into weak registries; remove target-aura runtime persistence writes and propagate native watch failures.
 - [x] Make ExperienceBar native takeover a verified property journal: refuse unreadable channels, read back every write, retain unresolved restore state for retry, reopen hooks on manager replacement, preserve newer conflicts, and propagate exact hook/suppress/restore failures.
 
@@ -80,5 +81,6 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 - [ ] Repeatedly skin, refresh, detach and re-enable all five ActionBars while injecting one holder/button `HookScript` failure; successful edges and textures remain single, only missing edges retry, callbacks follow the current module, no holder `_fguiAutoHidden`/`_fguiAutoHideHooks` fields appear, and the exact failure reaches Apply.
 - [ ] Before enabling ActionBars, set a distinctive Blizzard multi-bar toggle combination; addon apply must not alter `profile.actionbars.bars[4/5].enabled`, repeated identical applies must not rewrite native toggles, `/reload` must retain the original recovery vector, and detach must restore the exact original vector and remove its recovery record.
 - [ ] Rapid `Disable -> Enable` before queued callbacks fire does not execute an older lifecycle generation.
+- [ ] Inject one failure into each permanent ActionBars `hooksecurefunc`, SettingsPanel `HookScript`, callback-container creation/registration, and detach `Unregister`; successful edges remain single, only missing edges retry, `_initDone`/callback flags never publish early, callbacks follow the current owner, and detach releases owner references.
 - [ ] Enter/leave combat with action bars, movers, Edit Mode, profile apply/import/reset, and module disable/enable; no `ADDON_ACTION_BLOCKED` or `ADDON_ACTION_FORBIDDEN`.
 - [ ] Run every scenario in `docs/REGRESSION_MATRIX_1_25.md` with build/revision evidence.

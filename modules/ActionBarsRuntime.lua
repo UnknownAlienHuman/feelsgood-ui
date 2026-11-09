@@ -3,6 +3,9 @@ local _, ns = ...
 
 local Runtime = {}
 ns.ActionBarsRuntime = Runtime
+Runtime._callbackOwner = nil
+Runtime._callbackRecord = nil
+Runtime._nextCallbackID = 0
 
 local Log = ns.Log
 local DB = ns.DB
@@ -316,33 +319,81 @@ local function QueueDetachedRestore(module)
     end)
 end
 
-local function EnsureActionChangedCallback(module)
-    if (not module._callbackHandles)
-        and EventUtil
-        and type(EventUtil.CreateCallbackHandleContainer) == "function" then
-        module._callbackHandles = EventUtil.CreateCallbackHandleContainer()
-    end
+local function OnActionChanged(_, button)
+    local activeModule = Runtime._callbackOwner
+    if not IsReady(activeModule) or IsDetached(activeModule) then return end
 
-    if module._actionChangedCallbackRegistered
-        or not module._callbackHandles
-        or not _G.EventRegistry
-        or type(module._callbackHandles.RegisterCallback) ~= "function" then
+    if Visuals and Visuals.RefreshButtonVisualState then
+        if Visuals.RefreshButtonVisualState(button) then return end
+    end
+    if State and State.UpdateButtonChecked then State.UpdateButtonChecked(button) end
+    if State and State.UpdateButtonEmpty then State.UpdateButtonEmpty(button) end
+end
+
+local function DispatchActionChanged(record, _, button)
+    if not (record and record.active == true and Runtime._callbackRecord == record) then
         return
     end
+    OnActionChanged(nil, button)
+end
 
+local function EnsureActionChangedCallback(module)
+    local existingRecord = module._actionChangedCallbackRecord
+    if module._actionChangedCallbackRegistered == true
+        and type(existingRecord) == "table"
+        and existingRecord.active == true
+        and module._callbackHandles then
+        return true, nil, true, existingRecord
+    end
+
+    module._actionChangedCallbackRegistered = nil
+    module._actionChangedCallbackRecord = nil
+    module._callbackHandles = nil
+
+    if not _G.EventRegistry then
+        return true, nil, false, nil
+    end
+    if not (EventUtil and type(EventUtil.CreateCallbackHandleContainer) == "function") then
+        return true, nil, false, nil
+    end
+
+    local createOK, container = pcall(EventUtil.CreateCallbackHandleContainer)
+    if not createOK or not container then
+        return false, createOK and "Callback handle container unavailable" or tostring(container), false, nil
+    end
+    if type(container.RegisterCallback) ~= "function" then
+        return false, "Callback handle container lacks RegisterCallback", false, nil
+    end
+
+    Runtime._nextCallbackID = Runtime._nextCallbackID + 1
+    local record = {
+        id = Runtime._nextCallbackID,
+        active = true,
+    }
+    local callback = function(...)
+        DispatchActionChanged(record, ...)
+    end
+
+    local registeredOK, registeredDetail = pcall(
+        container.RegisterCallback,
+        container,
+        _G.EventRegistry,
+        "ActionButton.OnActionChanged",
+        callback,
+        module
+    )
+    if not registeredOK then
+        record.active = false
+        if type(container.Unregister) == "function" then
+            pcall(container.Unregister, container)
+        end
+        return false, tostring(registeredDetail), false, nil
+    end
+
+    module._callbackHandles = container
+    module._actionChangedCallbackRecord = record
     module._actionChangedCallbackRegistered = true
-    module._callbackHandles:RegisterCallback(_G.EventRegistry, "ActionButton.OnActionChanged", function(_, button)
-        if IsDetached(module) then
-            return
-        end
-        if Visuals and Visuals.RefreshButtonVisualState then
-            if Visuals.RefreshButtonVisualState(button) then
-                return
-            end
-        end
-        if State and State.UpdateButtonChecked then State.UpdateButtonChecked(button) end
-        if State and State.UpdateButtonEmpty then State.UpdateButtonEmpty(button) end
-    end, module)
+    return true, nil, true, record
 end
 
 function Runtime.PreviewMoverLayout(module, size, spacing)
@@ -391,6 +442,21 @@ function Runtime.ApplyNow(module)
 
     local ab = GetActionBarsCfg()
     module:EnsureCreated()
+
+    local stateHooksOK, stateHooksDetail = module:EnsureStateHooks(
+        module._actionChangedCallbackRegistered == true
+    )
+    if stateHooksOK == false then
+        return false, tostring(stateHooksDetail or "ActionBars state hook registration failed")
+    end
+
+    if Shell and Shell.EnsureEndCapsHook then
+        local endCapsOK, endCapsDetail = Shell.EnsureEndCapsHook(module)
+        if endCapsOK == false then
+            return false, "ActionBars end-cap hook registration failed: " .. tostring(endCapsDetail)
+        end
+    end
+
     local hooksOK, hooksDetail = module:EnsureAutoHideHooks()
     if hooksOK == false then
         if Log and type(Log.Warn) == "function" then
@@ -412,7 +478,10 @@ function Runtime.ApplyNow(module)
         Shell.EnsureBlizzardMultiBars(module, barsCfg)
     end
     if Shell and Shell.EnsureSettingsHooks then
-        Shell.EnsureSettingsHooks(module)
+        local settingsOK, settingsDetail = Shell.EnsureSettingsHooks(module)
+        if settingsOK == false then
+            return false, tostring(settingsDetail or "ActionBars settings hook registration failed")
+        end
     end
 
     local size = ab.buttonSize or 32
@@ -495,20 +564,52 @@ end
 
 function Runtime.Init(module)
     if not IsReady(module) then
-        return false
+        return false, "ActionBars init owner unavailable"
     end
+
+    local callbackOK, callbackDetail, callbackRegistered, callbackRecord = EnsureActionChangedCallback(module)
+    if callbackOK == false then
+        return false, "ActionBars action-change callback registration failed: " .. tostring(callbackDetail)
+    end
+
+    local stateOK, stateDetail = module:EnsureStateHooks(callbackRegistered == true)
+    if stateOK == false then
+        return false, tostring(stateDetail or "ActionBars state hook registration failed")
+    end
+
+    if Shell and Shell.EnsureEndCapsHook then
+        local endCapsOK, endCapsDetail = Shell.EnsureEndCapsHook(module)
+        if endCapsOK == false then
+            return false, "ActionBars end-cap hook registration failed: " .. tostring(endCapsDetail)
+        end
+    end
+
+    if State and type(State.SetStateHookOwner) == "function" then
+        local ownerOK, ownerDetail = State.SetStateHookOwner(module)
+        if ownerOK == false then
+            return false, tostring(ownerDetail or "ActionBars state hook owner publication failed")
+        end
+    end
+
+    if Shell and type(Shell.SetHookOwner) == "function" then
+        local ownerOK, ownerDetail = Shell.SetHookOwner(module)
+        if ownerOK == false then
+            if State and type(State.ReleaseStateHookOwner) == "function" then
+                State.ReleaseStateHookOwner(module)
+            end
+            return false, tostring(ownerDetail or "ActionBars shell hook owner publication failed")
+        end
+    end
+
+    Runtime._callbackOwner = callbackRegistered == true and module or nil
+    Runtime._callbackRecord = callbackRegistered == true and callbackRecord or nil
+
     if module._initDone then
         return true
     end
 
     module._initDone = true
     module._inited = true
-    module:EnsureStateHooks()
-
-    if Shell and Shell.EnsureEndCapsHook then
-        Shell.EnsureEndCapsHook(module)
-    end
-
     if Log and type(Log.Info) == "function" then
         Log:Info("ActionBars (Blizzard-button layout) loaded")
     end
@@ -523,8 +624,9 @@ function Runtime.Attach(module)
     CancelDetachedRestore(module)
     module._detached = nil
 
-    if Runtime.Init(module) == false then
-        return false
+    local initOK, initDetail = Runtime.Init(module)
+    if initOK == false then
+        return false, initDetail
     end
     if module._eventsAttached then
         return true
@@ -535,8 +637,6 @@ function Runtime.Attach(module)
         frame = CreateFrame("Frame")
         module._eventFrame = frame
     end
-
-    EnsureActionChangedCallback(module)
 
     frame:RegisterEvent("PLAYER_ENTERING_WORLD")
     frame:RegisterEvent("PLAYER_REGEN_DISABLED")
@@ -601,6 +701,17 @@ function Runtime.Detach(module)
 
     module._detached = true
 
+    local callbackRecord = module._actionChangedCallbackRecord
+    if type(callbackRecord) == "table" then
+        callbackRecord.active = false
+    end
+    if Runtime._callbackRecord == callbackRecord then
+        Runtime._callbackRecord = nil
+    end
+    if Runtime._callbackOwner == module then
+        Runtime._callbackOwner = nil
+    end
+
     if InCombat() then
         QueueDetachedRestore(module)
     else
@@ -610,22 +721,44 @@ function Runtime.Detach(module)
         end
     end
 
-    if not module._eventFrame then
-        module._eventsAttached = false
-        return false
+    local cleanupOK = true
+    local cleanupDetail
+    if module._eventFrame then
+        local okEvents, eventDetail = pcall(module._eventFrame.UnregisterAllEvents, module._eventFrame)
+        local okScript, scriptDetail = pcall(module._eventFrame.SetScript, module._eventFrame, "OnEvent", nil)
+        if not okEvents or not okScript then
+            cleanupOK = false
+            cleanupDetail = tostring((not okEvents and eventDetail) or scriptDetail)
+        end
     end
 
-    module._eventFrame:UnregisterAllEvents()
-    module._eventFrame:SetScript("OnEvent", nil)
-    if module._callbackHandles and type(module._callbackHandles.Unregister) == "function" then
-        module._callbackHandles:Unregister()
-    end
+    local callbackHandles = module._callbackHandles
+    module._callbackHandles = nil
+    module._actionChangedCallbackRecord = nil
     module._actionChangedCallbackRegistered = nil
+    if callbackHandles and type(callbackHandles.Unregister) == "function" then
+        local ok, detail = pcall(callbackHandles.Unregister, callbackHandles)
+        if not ok then
+            cleanupOK = false
+            cleanupDetail = cleanupDetail or tostring(detail)
+        end
+    end
+
+    if State and type(State.ReleaseStateHookOwner) == "function" then
+        State.ReleaseStateHookOwner(module)
+    end
+    if Shell and type(Shell.ReleaseHookOwner) == "function" then
+        Shell.ReleaseHookOwner(module)
+    end
+
     module._eventsAttached = false
     module._pending = nil
     module._pendingHide = nil
     module._pendingRestore = nil
     module._pendingManagedPositionsRefresh = nil
+    if not cleanupOK then
+        return false, "ActionBars detach cleanup failed: " .. tostring(cleanupDetail)
+    end
     return true
 end
 
