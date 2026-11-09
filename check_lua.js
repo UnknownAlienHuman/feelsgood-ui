@@ -138,6 +138,15 @@ try {
         }
     }
 
+    assertSourceIncludes('core/OptionsSharedHelpers.lua', 'Shared._adaptiveOwnerRegistry');
+    assertSourceIncludes('core/OptionsSharedHelpers.lua', 'Shared._wheelProxyRegistry');
+    assertSourceIncludes('core/OptionsSharedHelpers.lua', 'RegisterNumericSliderSync');
+    assertSourceIncludes('core/Movers.lua', 'Movers._stateListeners = setmetatable({}, { __mode = "k" })');
+    assertSourceIncludes('core/OptionsPanelEditMode.lua', 'local registered, detail = Movers:RegisterStateListener');
+    assertSourceExcludes('core/OptionsSharedHelpers.lua', /_fgui(?:AdaptiveWidthHooked|NumericParentHooked|WheelProxy)/, 'Options widget hook metadata');
+    assertSourceExcludes('core/OptionsPanelEditMode.lua', /_fguiMoversStateListenerRegistered/, 'Edit Mode listener metadata');
+    assertSourceExcludes('core/OptionsSharedHelpers.lua', /\._fgui\w*Hooked\s*=\s*true/, 'preemptive Options hook publication');
+
     assertSourceIncludes('core/Animate.lua', 'Animate._frameRegistry');
     assertSourceIncludes('core/Animate.lua', 'Animate._timerRegistry');
     assertSourceExcludes('core/Animate.lua', /_fguiAnimate(?:State|Timers)/, 'generic animation owner metadata');

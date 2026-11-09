@@ -16,6 +16,7 @@ local function BuildPanel_EditMode()
 
     local ctx = ctxFactory()
     local Apply = ctx.Apply
+    local Log = ctx.Log
     local Movers = ctx.Movers
     local Settings = ctx.Settings
     local CreateScrollablePanel = ctx.CreateScrollablePanel
@@ -139,13 +140,17 @@ local function BuildPanel_EditMode()
     local undoBtn = widgets.undoBtn
     local resetSectionBtn = widgets.resetSectionBtn
 
-    if Movers and Movers.RegisterStateListener and not root._fguiMoversStateListenerRegistered then
-        root._fguiMoversStateListenerRegistered = true
-        Movers:RegisterStateListener(root, function()
-            if root and root.refresh and root:IsVisible() then
-                root:refresh()
-            end
-        end)
+    local function RefreshMoverPanel(_, _, panelRoot)
+        if panelRoot and panelRoot.refresh and panelRoot:IsVisible() then
+            panelRoot:refresh()
+        end
+    end
+
+    if Movers and type(Movers.RegisterStateListener) == "function" then
+        local registered, detail = Movers:RegisterStateListener(root, RefreshMoverPanel)
+        if registered == false and Log and type(Log.Warn) == "function" then
+            Log:Warn("Edit Mode mover listener registration failed: " .. tostring(detail))
+        end
     end
 
     resetPosBtn:SetScript("OnClick", function()

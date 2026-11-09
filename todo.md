@@ -4,7 +4,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 
 ## Retail 12.1.5 implementation status
 
-- [x] Target Interface `120105` and release `0.0.64`.
+- [x] Target Interface `120105` and release `0.0.65`.
 - [x] Gate Secret/Restricted Values before Lua inspection, conversion, comparison, or formatting.
 - [x] Integrate restricted Unit Frame and Center Bar handling into the canonical render/target owners; remove late method overrides and duplicate producer calls.
 - [x] Keep opaque power/text on exact native sinks where available; otherwise render an explicit unavailable state.
@@ -32,6 +32,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 - [x] Journal PetActionButton takeover in `CompanionPetState`: separate structural layout from dynamic visibility ownership, reopen snapshots on component replacement, journal mover preview, refuse unreadable mutable components, and restore exact still-owned texture/text/cooldown/native-bar-alpha state.
 - [x] Move ActionBars runtime metadata off Blizzard ActionButton/FontString/Cooldown objects into weak-key button/region registries; hooks resolve current owner/layers through the registry and no callback/style cache is stored on foreign frames.
 - [x] Remove generic caller-object metadata: Animate fade/timer state and Minimap LibDBIcon hook state live in weak registries, active drag is button-specific, and the unused arbitrary cooldown-frame cache helper is deleted.
+- [x] Move Options adaptive-width, numeric-sync, wheel-proxy, and Edit Mode mover-listener ownership into weak registries; publish each hook edge only after successful registration and retry partial failures without widget/panel markers.
 - [x] Move UnitFrames target observers, aura roles, header-hook state, low-health cache and unit-watch ownership off oUF frames/elements into weak registries; remove target-aura runtime persistence writes and propagate native watch failures.
 - [x] Make ExperienceBar native takeover a verified property journal: refuse unreadable channels, read back every write, retain unresolved restore state for retry, reopen hooks on manager replacement, preserve newer conflicts, and propagate exact hook/suppress/restore failures.
 
@@ -40,6 +41,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 - [ ] Record `GetBuildInfo()` and confirm Interface `120105` on the tested client.
 - [ ] Fresh login and `/reload` complete with zero repeating Lua errors.
 - [ ] `/fgui qa` and `/fgui report` complete without legacy-field or schema failures.
+- [ ] Rebuild/show/resize every Options page while injecting one failure into owner/widget `HookScript` and mover-listener registration; successful edges remain single, only missing edges retry, widgets/panels receive no `_fgui*` markers, wheel forwarding fires once, and stale rebuilt-panel listeners are collectible/inert.
 - [ ] Remove a core/feature section after DB initialization, then open Theme, Safety, Minimap, QA, Movers, ActionBars, CenterBars, Companion and their settings panels; readers must not recreate the section, while one explicit `EnsureSection`/Settings normalization repairs it.
 - [ ] Toggle debug and perf from both General settings and slash commands; profile, runtime state, and `Undo last` stay identical after success and rollback.
 - [ ] Run `/fgui aura mini|classic`; UnitFrames apply executes through the normal queue and a forced failure restores the prior mode/history.
