@@ -38,7 +38,8 @@ Execution rule: every run records the exact client build, addon revision, result
 | 11 | Target/focus/targettarget ordinary values | Name, level, class, classification, reaction color, and target-of-target update |  |  |
 | 12 | Restricted/Secret health or identity context | No Lua operation error; opaque text uses native display or unavailable state |  |  |
 | 13 | Target aura mode `MINI` and `CLASSIC` | Ownership filter, layout, and header anchoring update without stale icons |  |  |
-| 13a | Remove a UnitFrames section/size/scale field after DB initialization, then create and apply frames | Runtime resolves immutable defaults without recreating or mutating the missing persisted field; explicit DB/schema normalization remains the only repair owner |  |  |
+| 13a | Remove a UnitFrames section/size/scale/target-aura field after DB initialization, then create and apply frames | Runtime resolves immutable defaults without recreating or mutating the missing persisted field; explicit DB/schema normalization remains the only repair owner |  |  |
+| 13b | Reattach target/focus/targettarget observers, replace aura containers, and inject unit-watch register/unregister failure | Weak registries own observer/aura/header/low-health/watch state; no `_fgui*` fields or duplicate hooks remain; failure propagates and retry/teardown is exact |  |  |
 | 14 | Enter/leave combat with combat timer enabled | Timer starts once, stops once, and leaves no ticker after disable |  |  |
 | 15 | Center power with ordinary values | Min/max, fill, threshold color/spark, and text update correctly |  |  |
 | 16 | Center power with restricted values | StatusBar receives opaque values directly; no format/readback/error loop |  |  |

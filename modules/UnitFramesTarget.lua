@@ -12,6 +12,33 @@ local U = ns.U
 local EMPTY = {}
 
 Target._ctx = Target._ctx or EMPTY
+Target._frameRegistry = Target._frameRegistry or setmetatable({}, { __mode = "k" })
+Target._ownerRegistry = Target._ownerRegistry or setmetatable({}, { __mode = "k" })
+Target._auraRoleRegistry = Target._auraRoleRegistry or setmetatable({}, { __mode = "k" })
+Target._headerHookRegistry = Target._headerHookRegistry or setmetatable({}, { __mode = "k" })
+
+local FrameRegistry = Target._frameRegistry
+local OwnerRegistry = Target._ownerRegistry
+local AuraRoleRegistry = Target._auraRoleRegistry
+local HeaderHookRegistry = Target._headerHookRegistry
+
+local function GetFrameRecord(frame, create)
+    local record = frame and FrameRegistry[frame] or nil
+    if not record and create == true and frame then
+        record = {}
+        FrameRegistry[frame] = record
+    end
+    return record
+end
+
+local function GetOwnerRecord(owner, create)
+    local record = owner and OwnerRegistry[owner] or nil
+    if not record and create == true and owner then
+        record = {}
+        OwnerRegistry[owner] = record
+    end
+    return record
+end
 
 function Target:Configure(context)
     if type(context) == "table" then
@@ -318,11 +345,12 @@ local function AuraCustomFilter(element, unit, ...)
     local targetAuras = type(cache.targetAuras) == "table" and cache.targetAuras or EMPTY
     local mode = Target.NormalizeTargetAuraMode(targetAuras.mode)
 
-    if element and element.__fgui_isTargetBuffs then
+    local role = element and AuraRoleRegistry[element] or nil
+    if role == "buffs" then
         return mode == "CLASSIC"
     end
 
-    if element and element.__fgui_isTargetDebuffs and mode == "MINI" then
+    if role == "debuffs" and mode == "MINI" then
         local sourceUnit, auraData = AuraExtractSourceUnit(...)
         local ok = AuraIsFromPlayerOrPet(sourceUnit, auraData, ...)
         if ok == nil then return true end
@@ -336,13 +364,8 @@ function Target.ApplyTargetAuraModeToFrame(frame)
     if not frame or not IsTargetLikeUnit(frame.unit) then return end
 
     local unitframesCfg = GetUnitFramesCfg()
-    local targetAuras = type(unitframesCfg.targetAuras) == "table" and unitframesCfg.targetAuras or nil
-    if not targetAuras and unitframesCfg ~= EMPTY then
-        targetAuras = {}
-        unitframesCfg.targetAuras = targetAuras
-    end
-
-    local mode = Target.NormalizeTargetAuraMode(targetAuras and targetAuras.mode)
+    local targetAuras = type(unitframesCfg.targetAuras) == "table" and unitframesCfg.targetAuras or EMPTY
+    local mode = Target.NormalizeTargetAuraMode(targetAuras.mode)
 
     local buffs = frame.Buffs
     local debuffs = frame.Debuffs
@@ -350,8 +373,8 @@ function Target.ApplyTargetAuraModeToFrame(frame)
 
     buffs.filter = "HELPFUL"
     debuffs.filter = "HARMFUL"
-    buffs.__fgui_isTargetBuffs = true
-    debuffs.__fgui_isTargetDebuffs = true
+    AuraRoleRegistry[buffs] = "buffs"
+    AuraRoleRegistry[debuffs] = "debuffs"
     buffs.CustomFilter = AuraCustomFilter
     buffs.customFilter = AuraCustomFilter
     debuffs.CustomFilter = AuraCustomFilter
@@ -377,10 +400,6 @@ function Target.ApplyTargetAuraModeToFrame(frame)
         debuffs:SetPoint("BOTTOMLEFT", frame, "TOPLEFT", 0, 6)
         debuffs["growth-y"] = "UP"
         debuffs.onlyShowPlayer = true
-    end
-
-    if targetAuras then
-        targetAuras.mode = mode
     end
 
     if frame.unit == "target" then
@@ -579,26 +598,56 @@ local function RefreshFrame(frame)
     Target.UpdateUnitHealthColor(frame, unit)
 end
 
-local function HookTargetHeaderAnchorSignals(frame)
-    if type(frame) ~= "table" or not frame.TargetHeader or frame._fguiTargetHeaderSignals then
-        return
+local function HookTargetHeaderSignal(frame, element)
+    if not (frame and element and type(element.HookScript) == "function") then
+        return true
+    end
+
+    local hook = HeaderHookRegistry[element]
+    if not hook then
+        hook = { frame = frame }
+        HeaderHookRegistry[element] = hook
+    else
+        hook.frame = frame
     end
 
     local function RefreshHeader()
-        Target.LayoutTargetHeader(frame)
-        Target.ApplyTargetHeaderTextColor(frame)
+        local current = HeaderHookRegistry[element]
+        local currentFrame = current and current.frame or nil
+        local record = currentFrame and FrameRegistry[currentFrame] or nil
+        if not record or record.active ~= true then
+            return
+        end
+        Target.LayoutTargetHeader(currentFrame)
+        Target.ApplyTargetHeaderTextColor(currentFrame)
     end
 
-    if frame.Buffs and frame.Buffs.HookScript then
-        frame.Buffs:HookScript("OnShow", RefreshHeader)
-        frame.Buffs:HookScript("OnHide", RefreshHeader)
-    end
-    if frame.Debuffs and frame.Debuffs.HookScript then
-        frame.Debuffs:HookScript("OnShow", RefreshHeader)
-        frame.Debuffs:HookScript("OnHide", RefreshHeader)
+    if hook.showHooked ~= true then
+        local ok, err = pcall(element.HookScript, element, "OnShow", RefreshHeader)
+        if not ok then
+            return false, "Target header OnShow hook failed: " .. tostring(err)
+        end
+        hook.showHooked = true
     end
 
-    frame._fguiTargetHeaderSignals = true
+    if hook.hideHooked ~= true then
+        local ok, err = pcall(element.HookScript, element, "OnHide", RefreshHeader)
+        if not ok then
+            return false, "Target header OnHide hook failed: " .. tostring(err)
+        end
+        hook.hideHooked = true
+    end
+    return true
+end
+
+local function HookTargetHeaderAnchorSignals(frame)
+    if type(frame) ~= "table" or not frame.TargetHeader then
+        return true
+    end
+
+    local ok, detail = HookTargetHeaderSignal(frame, frame.Buffs)
+    if ok == false then return false, detail end
+    return HookTargetHeaderSignal(frame, frame.Debuffs)
 end
 
 local function HandleObservedEvent(frame, owner, event, unit)
@@ -636,30 +685,48 @@ end
 
 local function AttachFrameSignals(frame, owner)
     if type(frame) ~= "table" then
-        return
+        return true
     end
 
     local unit = frame.unit
     if unit ~= "target" and unit ~= "focus" and unit ~= "targettarget" then
-        return
+        return true
     end
+
+    local record = GetFrameRecord(frame, true)
+    record.owner = owner
+    record.active = true
 
     if unit == "target" then
-        HookTargetHeaderAnchorSignals(frame)
+        local hooked, hookDetail = HookTargetHeaderAnchorSignals(frame)
+        if hooked == false then
+            record.active = false
+            record.owner = nil
+            return false, hookDetail
+        end
     end
 
-    local observer = frame._fguiTargetObserver
+    local observer = record.observer
     if not observer then
-        observer = CreateFrame("Frame", nil, frame)
-        frame._fguiTargetObserver = observer
+        local ok, created = pcall(CreateFrame, "Frame", nil, frame)
+        if not ok or not created then
+            record.active = false
+            record.owner = nil
+            return false, "Target observer creation failed: " .. tostring(created)
+        end
+
+        observer = created
+        record.observer = observer
+        observer:SetScript("OnEvent", function(_, event, ...)
+            local current = FrameRegistry[frame]
+            if not current or current.active ~= true then
+                return
+            end
+            HandleObservedEvent(frame, current.owner, event, ...)
+        end)
     end
 
     observer:UnregisterAllEvents()
-    observer._fguiFrame = frame
-    observer._fguiOwner = owner
-    observer:SetScript("OnEvent", function(self, event, ...)
-        HandleObservedEvent(self._fguiFrame, self._fguiOwner, event, ...)
-    end)
 
     if unit == "target" then
         observer:RegisterEvent("PLAYER_TARGET_CHANGED")
@@ -676,7 +743,7 @@ local function AttachFrameSignals(frame, owner)
             observer:RegisterEvent("UNIT_FACTION")
             observer:RegisterEvent("UNIT_TARGET")
         end
-        return
+        return true
     end
 
     if unit == "focus" then
@@ -688,38 +755,76 @@ local function AttachFrameSignals(frame, owner)
     else
         observer:RegisterEvent("UNIT_FACTION")
     end
+    return true
 end
 
 local function DetachFrameSignals(frame)
-    local observer = type(frame) == "table" and frame._fguiTargetObserver or nil
-    if not observer then
-        return
+    local record = type(frame) == "table" and FrameRegistry[frame] or nil
+    if not record then
+        return true
     end
 
-    observer:UnregisterAllEvents()
-    observer:SetScript("OnEvent", nil)
-    observer._fguiFrame = nil
-    observer._fguiOwner = nil
+    record.active = false
+    record.owner = nil
+    local observer = record.observer
+    if observer then
+        observer:UnregisterAllEvents()
+    end
+    return true
 end
 
 function Target.AttachOwner(owner)
     if type(owner) ~= "table" then
-        return
+        return false, "UnitFrames target observer owner is unavailable"
     end
 
-    AttachFrameSignals(owner.target, owner)
-    AttachFrameSignals(owner.focus, owner)
-    AttachFrameSignals(owner.targettarget, owner)
+    local ownerRecord = GetOwnerRecord(owner, true)
+    local fields = { "target", "focus", "targettarget" }
+    local attachedFields = {}
+    for i = 1, #fields do
+        local field = fields[i]
+        local current = owner[field]
+        local previous = ownerRecord[field]
+        if previous and previous ~= current then
+            DetachFrameSignals(previous)
+            ownerRecord[field] = nil
+        end
+
+        local ok, detail = AttachFrameSignals(current, owner)
+        if ok == false then
+            for j = 1, #attachedFields do
+                local attachedField = attachedFields[j]
+                DetachFrameSignals(ownerRecord[attachedField])
+                ownerRecord[attachedField] = nil
+            end
+            return false, detail
+        end
+
+        ownerRecord[field] = current
+        attachedFields[#attachedFields + 1] = field
+    end
+    return true
 end
 
 function Target.DetachOwner(owner)
     if type(owner) ~= "table" then
-        return
+        return true
     end
 
-    DetachFrameSignals(owner.target)
-    DetachFrameSignals(owner.focus)
-    DetachFrameSignals(owner.targettarget)
+    local ownerRecord = GetOwnerRecord(owner, false)
+    local fields = { "target", "focus", "targettarget" }
+    for i = 1, #fields do
+        local field = fields[i]
+        local recorded = ownerRecord and ownerRecord[field] or nil
+        local current = owner[field]
+        DetachFrameSignals(recorded)
+        if current ~= recorded then
+            DetachFrameSignals(current)
+        end
+        if ownerRecord then ownerRecord[field] = nil end
+    end
+    OwnerRegistry[owner] = nil
+    return true
 end
 
 local function ApplyOwnerAuraMode(owner)
@@ -734,16 +839,22 @@ end
 
 function Target.ReconcileOwner(owner)
     if type(owner) ~= "table" then
-        return
+        return false, "UnitFrames target observer owner is unavailable"
     end
 
-    HookTargetHeaderAnchorSignals(owner.target)
+    -- Re-open ownership on every reconciliation. oUF or another integration may
+    -- replace a frame/aura container after the initial lifecycle attach.
+    local attached, detail = Target.AttachOwner(owner)
+    if attached == false then
+        return false, detail
+    end
 
     ApplyOwnerAuraMode(owner)
     RefreshFrame(owner.target)
     RefreshFrame(owner.focus)
     RefreshFrame(owner.targettarget)
     RefreshFrame(owner.pet)
+    return true
 end
 
 return Target

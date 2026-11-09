@@ -15,6 +15,8 @@ local InCombat = InCombatLockdown or function() return false end
 local EMPTY = {}
 
 Runtime._ctx = Runtime._ctx or EMPTY
+Runtime._unitWatchRegistry = Runtime._unitWatchRegistry or setmetatable({}, { __mode = "k" })
+local UnitWatchRegistry = Runtime._unitWatchRegistry
 
 function Runtime:Configure(context)
     if type(context) == "table" then
@@ -54,25 +56,57 @@ end
 
 local function SetUnitWatch(frame, enabled)
     if not frame then
-        return
+        return true
     end
 
+    local watched = UnitWatchRegistry[frame] == true
     if enabled then
-        if not frame._fguiUnitWatch then
-            if _G.RegisterUnitWatch then
-                pcall(_G.RegisterUnitWatch, frame)
-            end
-            frame._fguiUnitWatch = true
+        if watched then return true end
+        if type(_G.RegisterUnitWatch) ~= "function" then
+            return false, "RegisterUnitWatch is unavailable"
         end
-    else
-        if frame._fguiUnitWatch then
-            if _G.UnregisterUnitWatch then
-                pcall(_G.UnregisterUnitWatch, frame)
-            end
-            frame._fguiUnitWatch = false
+
+        local ok, err = pcall(_G.RegisterUnitWatch, frame)
+        if not ok then
+            return false, "RegisterUnitWatch failed: " .. tostring(err)
         end
+        UnitWatchRegistry[frame] = true
+        return true
+    end
+
+    if watched then
+        if type(_G.UnregisterUnitWatch) ~= "function" then
+            return false, "UnregisterUnitWatch is unavailable"
+        end
+
+        local ok, err = pcall(_G.UnregisterUnitWatch, frame)
+        if not ok then
+            return false, "UnregisterUnitWatch failed: " .. tostring(err)
+        end
+        UnitWatchRegistry[frame] = nil
+    end
+
+    if type(frame.Hide) == "function" then
         frame:Hide()
     end
+    return true
+end
+
+local function DisableOptionalUnitWatches(owner)
+    local failures = {}
+    local fields = { "focus", "targettarget", "pet" }
+    for i = 1, #fields do
+        local field = fields[i]
+        local ok, detail = SetUnitWatch(owner and owner[field], false)
+        if ok == false then
+            failures[#failures + 1] = field .. ": " .. tostring(detail)
+        end
+    end
+
+    if #failures > 0 then
+        return false, table.concat(failures, "; ")
+    end
+    return true
 end
 
 local function ApplyToFrame(frame, unit, unitframesCfg, defaults, font, textCfg, statusbar, castbarHeight)
@@ -132,7 +166,10 @@ local function AttachObservers(owner)
     end
 
     if Target and Target.AttachOwner then
-        Target.AttachOwner(owner)
+        local attached, detail = Target.AttachOwner(owner)
+        if attached == false then
+            return false, detail
+        end
     end
     owner._eventsAttached = true
     return true
@@ -168,9 +205,7 @@ end
 function Runtime:Detach(owner)
     DetachObservers(owner)
 
-    SetUnitWatch(owner.focus, false)
-    SetUnitWatch(owner.targettarget, false)
-    SetUnitWatch(owner.pet, false)
+    local watchesDisabled, watchDetail = DisableOptionalUnitWatches(owner)
 
     if owner.player then
         owner.player:Hide()
@@ -184,6 +219,9 @@ function Runtime:Detach(owner)
 
     owner._configDirty = nil
     owner._auraModeDirty = nil
+    if watchesDisabled == false then
+        return false, watchDetail
+    end
     return true
 end
 
@@ -288,9 +326,7 @@ function Runtime:ApplyConfig(owner)
 
     if unitframesCfg.enabled == false then
         DetachObservers(owner)
-        SetUnitWatch(owner.focus, false)
-        SetUnitWatch(owner.targettarget, false)
-        SetUnitWatch(owner.pet, false)
+        local watchesDisabled, watchDetail = DisableOptionalUnitWatches(owner)
 
         if owner.player then
             owner.player:Hide()
@@ -300,6 +336,9 @@ function Runtime:ApplyConfig(owner)
         end
         if owner.player and owner.player.CombatTime then
             Call("StopCombatTimer", owner.player)
+        end
+        if watchesDisabled == false then
+            return false, watchDetail
         end
         return true
     end
@@ -335,9 +374,12 @@ function Runtime:ApplyConfig(owner)
     local showTargetTarget = not (unitframesCfg.showTargetTarget == false)
     local showPet = not (unitframesCfg.showPet == false)
 
-    SetUnitWatch(owner.focus, showFocus)
-    SetUnitWatch(owner.targettarget, showTargetTarget)
-    SetUnitWatch(owner.pet, showPet)
+    local focusWatched, focusDetail = SetUnitWatch(owner.focus, showFocus)
+    if focusWatched == false then return false, "focus: " .. tostring(focusDetail) end
+    local targetTargetWatched, targetTargetDetail = SetUnitWatch(owner.targettarget, showTargetTarget)
+    if targetTargetWatched == false then return false, "targettarget: " .. tostring(targetTargetDetail) end
+    local petWatched, petDetail = SetUnitWatch(owner.pet, showPet)
+    if petWatched == false then return false, "pet: " .. tostring(petDetail) end
 
     ApplyToFrame(owner.focus, "focus", unitframesCfg, defaults, font, textCfg, statusbar, castbarHeight)
     ApplyToFrame(owner.targettarget, "targettarget", unitframesCfg, defaults, font, textCfg, statusbar, castbarHeight)
@@ -366,7 +408,10 @@ function Runtime:ApplyConfig(owner)
     end
 
     if Target and Target.ReconcileOwner then
-        Target.ReconcileOwner(owner)
+        local reconciled, reconcileDetail = Target.ReconcileOwner(owner)
+        if reconciled == false then
+            return false, reconcileDetail
+        end
     end
 
     owner.player:Show()
