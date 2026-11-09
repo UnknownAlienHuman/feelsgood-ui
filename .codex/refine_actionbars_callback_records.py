@@ -12,9 +12,13 @@ runtime_path = Path('modules/ActionBarsRuntime.lua')
 runtime = runtime_path.read_text(encoding='utf-8')
 runtime = replace_once(
     runtime,
-    '''Runtime._callbackOwner = nil
+    '''local Runtime = {}
+ns.ActionBarsRuntime = Runtime
+Runtime._callbackOwner = nil
 ''',
-    '''Runtime._callbackOwner = nil
+    '''local Runtime = {}
+ns.ActionBarsRuntime = Runtime
+Runtime._callbackOwner = nil
 Runtime._callbackRecord = nil
 Runtime._nextCallbackID = 0
 ''',
