@@ -408,7 +408,10 @@ function Runtime:ApplyConfig(owner)
     end
 
     if Target and Target.ReconcileOwner then
-        Target.ReconcileOwner(owner)
+        local reconciled, reconcileDetail = Target.ReconcileOwner(owner)
+        if reconciled == false then
+            return false, reconcileDetail
+        end
     end
 
     owner.player:Show()

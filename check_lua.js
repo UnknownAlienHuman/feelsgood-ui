@@ -151,6 +151,9 @@ try {
     assertSourceIncludes('modules/UnitFramesTarget.lua', 'Target._frameRegistry');
     assertSourceIncludes('modules/UnitFramesTarget.lua', 'Target._auraRoleRegistry');
     assertSourceIncludes('modules/UnitFramesTarget.lua', 'Target._headerHookRegistry');
+    assertSourceIncludes('modules/UnitFramesTarget.lua', 'local attached, detail = Target.AttachOwner(owner)');
+    assertSourceIncludes('modules/UnitFramesRuntime.lua', 'local reconciled, reconcileDetail = Target.ReconcileOwner(owner)');
+    assertSourceExcludes('modules/UnitFramesRuntime.lua', /Target\.ReconcileOwner\(owner\)\s*\n\s*end/, 'ignored UnitFrames reconciliation result');
     assertSourceIncludes('modules/UnitFramesRender.lua', 'Render._lowHPRegistry');
     assertSourceIncludes('modules/UnitFramesRuntime.lua', 'Runtime._unitWatchRegistry');
     assertSourceExcludes('modules/UnitFramesTarget.lua', /_fgui/, 'oUF target observer or aura metadata');

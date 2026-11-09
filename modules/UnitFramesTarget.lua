@@ -839,16 +839,22 @@ end
 
 function Target.ReconcileOwner(owner)
     if type(owner) ~= "table" then
-        return
+        return false, "UnitFrames target observer owner is unavailable"
     end
 
-    HookTargetHeaderAnchorSignals(owner.target)
+    -- Re-open ownership on every reconciliation. oUF or another integration may
+    -- replace a frame/aura container after the initial lifecycle attach.
+    local attached, detail = Target.AttachOwner(owner)
+    if attached == false then
+        return false, detail
+    end
 
     ApplyOwnerAuraMode(owner)
     RefreshFrame(owner.target)
     RefreshFrame(owner.focus)
     RefreshFrame(owner.targettarget)
     RefreshFrame(owner.pet)
+    return true
 end
 
 return Target
