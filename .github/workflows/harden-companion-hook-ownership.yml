@@ -6,6 +6,7 @@ on:
       - codex/companion-hook-ownership
     paths:
       - '.github/workflows/harden-companion-hook-ownership.yml'
+      - '.codex/fix_companion_checker.py'
 
 permissions:
   contents: write
@@ -38,6 +39,7 @@ jobs:
           e3d4ba0fd8c25bbb7721d69d0f3a33540793f201956615287bcf9c4348a1a544  .codex/parts/companion.harness.part02.b64
           d4b3cd7000f00c001488dbb201d0991ec9ee8551c6aca830f52298a2dcdee51f  .codex/parts/companion.harness.part03.b64
           017ebec85cb1a88497a18d4f00ab129fe789eae831cb59c0477b5a6502442803  .codex/parts/companion.harness.part04.b64
+          9725f3df66750fc8b068305547e021b8aeee35c762f5e1ad2d68b039afdd3abb  .codex/fix_companion_checker.py
           SUMS
 
           cat .codex/parts/companion.transform.part*.b64 > /tmp/companion.transform.gz.b64
@@ -55,6 +57,7 @@ jobs:
         run: |
           set -euo pipefail
           python /tmp/harden_companion_hook_ownership.py
+          python .codex/fix_companion_checker.py
           git diff --check
 
       - name: Audit permanent-hook ownership
@@ -98,6 +101,8 @@ jobs:
 
           assert 'preemptive Companion source hook publication' in check
           assert 'StyleBackpackButton(button, cp.buttonSize or 32, true)' in check
+          assert 'GetWeakHookRegistry(module, "_microSourceHooks")' in check
+          assert 'GetWeakHookRegistry(module, "_bagTextureHooks")' in check
           print('Companion permanent-hook ownership audit passed.')
           PY
 
