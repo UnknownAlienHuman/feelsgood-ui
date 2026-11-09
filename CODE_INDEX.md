@@ -20,7 +20,7 @@
 | `modules/UnitFramesRuntime.lua`, `modules/UnitFramesRender.lua`, `modules/UnitFramesTarget.lua`, `modules/UnitFramesText.lua`, `modules/UnitFrames.lua` | Unit-frame lifecycle, rendering, target/aura observers, text safety, weak-key oUF runtime ownership, and result-bearing unit-watch transitions without persisted configuration repair. |
 | `modules/ActionBarsBlizzardShell.lua` | Reversible Blizzard shell/native-toggle takeover, per-character recovery across reload/interruption, exact detach restore, and managed-position synchronization. |
 | `modules/ActionBars.lua`, `modules/ActionBarsRuntime.lua`, `modules/ActionBarsEditMode.lua` | Secure holders, event/lifecycle coordination, and mover integration without direct profile mutation. |
-| `modules/ActionBarsState.lua`, `modules/ActionBarsVisuals.lua` | Weak-key ActionButton/region runtime registries, custom state layers, typography/cooldown caches, empty-slot and hotkey presentation. |
+| `modules/ActionBarsState.lua`, `modules/ActionBarsVisuals.lua` | Weak-key ActionButton/holder/region runtime registries, result-bearing custom state-layer and auto-hide hook ownership, typography/cooldown caches, empty-slot and hotkey presentation. |
 | `modules/CenterBars*.lua` | Center-resource rendering/runtime plus reversible, conflict-aware Blizzard class-resource alpha/mouse ownership. |
 | `modules/CompanionRuntime.lua` | Result-bearing Companion lifecycle/apply coordinator and partial-layer cleanup. |
 | `modules/CompanionPetState.lua` | Exact original/managed PetActionButton and native PetActionBar snapshot journal with conflict-aware restore. |

@@ -57,8 +57,9 @@ end
 
 function ActionBars:_SetHolderAutoHidden(holder, hidden)
     if State and State.SetHolderAutoHidden then
-        State.SetHolderAutoHidden(holder, hidden)
+        return State.SetHolderAutoHidden(holder, hidden)
     end
+    return false
 end
 
 function ActionBars:_IsAnyHolderHovered()
@@ -82,8 +83,9 @@ end
 
 function ActionBars:EnsureAutoHideHooks()
     if State and State.EnsureAutoHideHooks then
-        State.EnsureAutoHideHooks(self)
+        return State.EnsureAutoHideHooks(self)
     end
+    return false, "ActionBars state owner unavailable"
 end
 
 function ActionBars:EnsureStateHooks()

@@ -172,6 +172,17 @@ try {
     assertSourceExcludes('modules/UnitFramesTarget.lua', /targetAuras\.mode\s*=/, 'runtime target-aura mode write');
 
     assertSourceIncludes('modules/ActionBarsState.lua', 'State._buttonRegistry');
+    assertSourceIncludes('modules/ActionBarsState.lua', 'State._holderRegistry');
+    assertSourceIncludes('modules/ActionBarsState.lua', 'local function EnsureScriptHook');
+    assertSourceIncludes('modules/ActionBarsState.lua', 'OnButtonAutoHideEdge');
+    assertSourceIncludes('modules/ActionBarsState.lua', 'OnHolderAutoHideEdge');
+    assertSourceExcludes('modules/ActionBarsState.lua', /holder\._fguiAutoHidden/, 'ActionBars holder auto-hide metadata');
+    assertSourceExcludes('modules/ActionBarsState.lua', /holder\._fguiAutoHideHooks/, 'ActionBars holder hook metadata');
+    assertSourceExcludes('modules/ActionBarsState.lua', /module\._autoHideHooksAttached\s*=\s*true/, 'preemptive ActionBars holder-hook publication');
+    assertSourceExcludes('modules/ActionBarsState.lua', /record\.autoHideHooks\s*=\s*true\s*\n\s*btn:HookScript/, 'preemptive ActionButton hook publication');
+    assertSourceIncludes('modules/ActionBarsRuntime.lua', 'local hooksOK, hooksDetail = module:EnsureAutoHideHooks()');
+    assertSourceIncludes('modules/ActionBarsVisuals.lua', 'if ok == false then return false, detail end');
+
     assertSourceIncludes('modules/ActionBarsState.lua', 'function State.GetButtonRecord');
     assertSourceIncludes('modules/ActionBarsVisuals.lua', 'Visuals._regionRegistry');
     assertSourceIncludes('modules/ActionBarsVisuals.lua', 'local function GetRegionRecord');

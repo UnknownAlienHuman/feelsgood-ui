@@ -149,26 +149,41 @@ end
 local function AssignButtons(module, holder, prefix, style, showHotkeys)
     local buttons = CollectButtons(prefix)
     if not buttons then
-        return false
+        return false, "ActionButtons unavailable for " .. tostring(prefix)
     end
 
+    local allOK = true
+    local firstDetail
     for i = 1, BUTTONS_PER_BAR do
         local button = buttons[i]
         holder.buttons[i] = button
 
         if Visuals and Visuals.SkinButton then
-            Visuals.SkinButton(button, style)
+            local ok, detail = Visuals.SkinButton(button, style)
+            if ok == false then
+                allOK = false
+                firstDetail = firstDetail or detail or "ActionButton skin initialization failed"
+            end
         end
         if Visuals and Visuals.RefreshButtonVisualState then
-            Visuals.RefreshButtonVisualState(button, style, showHotkeys)
+            local ok, detail = Visuals.RefreshButtonVisualState(button, style, showHotkeys)
+            if ok == false then
+                allOK = false
+                firstDetail = firstDetail or detail or "ActionButton visual refresh failed"
+            end
         end
 
         if State and State.AttachButtonAutoHideHooks then
-            State.AttachButtonAutoHideHooks(button, module)
+            local ok, detail = State.AttachButtonAutoHideHooks(button, module)
+            if ok == false then
+                allOK = false
+                firstDetail = firstDetail or detail or "ActionButton auto-hide hook registration failed"
+            end
         end
     end
 
-    return true
+    if allOK then return true end
+    return false, firstDetail
 end
 
 local function ApplyHolderHotkeys(holder, showHotkeys)
@@ -201,10 +216,10 @@ local function ApplyBarHolderConfig(module, holder, cfg, styleCfg, size, spacing
         return true
     end
 
-    local ok = AssignButtons(module, holder, prefix, styleCfg, showHotkeys)
+    local ok, detail = AssignButtons(module, holder, prefix, styleCfg, showHotkeys)
     if not ok then
         holder:Hide()
-        return false
+        return false, detail
     end
 
     LayoutHolder(holder, cfg.buttons or 12, cfg.rows or 1, size, spacing)
@@ -368,7 +383,13 @@ function Runtime.ApplyNow(module)
 
     local ab = GetActionBarsCfg()
     module:EnsureCreated()
-    module:EnsureAutoHideHooks()
+    local hooksOK, hooksDetail = module:EnsureAutoHideHooks()
+    if hooksOK == false then
+        if Log and type(Log.Warn) == "function" then
+            Log:Warn("ActionBars auto-hide hook registration failed: " .. tostring(hooksDetail))
+        end
+        return false
+    end
 
     local autoHide = (type(ab.autoHide) == "table") and ab.autoHide or nil
     module._autoHideEnabled = autoHide and autoHide.enabled == true or false

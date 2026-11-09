@@ -9,7 +9,49 @@ local Movers = ns.Movers
 local InCombat = InCombatLockdown or function() return false end
 
 State._buttonRegistry = State._buttonRegistry or setmetatable({}, { __mode = "k" })
+State._holderRegistry = State._holderRegistry or setmetatable({}, { __mode = "k" })
 local ButtonRegistry = State._buttonRegistry
+local HolderRegistry = State._holderRegistry
+
+local function GetHolderRecord(holder, create)
+    if not holder then return nil end
+    local record = HolderRegistry[holder]
+    if not record and create then
+        record = {}
+        HolderRegistry[holder] = record
+    end
+    return record
+end
+
+function State.GetHolderRecord(holder, create)
+    return GetHolderRecord(holder, create == true)
+end
+
+local function TryHookScript(target, event, callback)
+    if not (target and type(target.HookScript) == "function") then
+        return false, tostring(event) .. " HookScript unavailable"
+    end
+
+    local ok, detail = pcall(target.HookScript, target, event, callback)
+    if not ok then
+        return false, tostring(detail)
+    end
+    return true
+end
+
+local function EnsureScriptHook(record, target, event, field, callback)
+    if record[field] == true then return true end
+
+    local ok, detail = TryHookScript(target, event, callback)
+    if ok then
+        record[field] = true
+        record[field .. "Error"] = nil
+        return true
+    end
+
+    record[field .. "Error"] = detail
+    return false, detail
+end
 
 local function GetButtonRecord(button, create)
     if not button then return nil end
@@ -60,63 +102,109 @@ local function ForEachHolderButton(holder, fn)
     end
 end
 
+local function OnButtonStateEnter(btn)
+    local record = GetButtonRecord(btn, false)
+    local owner = record and record.module
+    if owner and owner._detached == true then return end
+    local layer = record and record.layers and record.layers.highlight
+    if layer then layer:Show() end
+end
+
+local function OnButtonStateLeave(btn)
+    local record = GetButtonRecord(btn, false)
+    local layer = record and record.layers and record.layers.highlight
+    if layer then layer:Hide() end
+end
+
+local function EnsureStateTexture(btn, record, name, drawLayer, subLevel, alpha, blendMode)
+    record.layers = record.layers or {}
+    local texture = record.layers[name]
+    if not texture then
+        if type(btn.CreateTexture) ~= "function" then
+            return false, "ActionButton CreateTexture unavailable"
+        end
+        local ok, created = pcall(btn.CreateTexture, btn, nil, drawLayer, nil, subLevel)
+        if not ok or not created then
+            return false, ok and "ActionButton texture creation returned nil" or tostring(created)
+        end
+        texture = created
+        record.layers[name] = texture
+    end
+
+    local ok, detail = pcall(function()
+        texture:SetAllPoints(btn)
+        texture:SetColorTexture(1, 1, 1, alpha)
+        if blendMode then texture:SetBlendMode(blendMode) end
+        texture:Hide()
+    end)
+    if not ok then
+        return false, tostring(detail)
+    end
+    return true
+end
+
 local function EnsureStateLayers(btn)
     local record = GetButtonRecord(btn, true)
-    if not record or record.stateLayers then return end
-    record.stateLayers = true
-    record.layers = record.layers or {}
+    if not record then return false, "ActionButton record unavailable" end
 
-    local hl = btn:CreateTexture(nil, "HIGHLIGHT")
-    hl:SetAllPoints(btn)
-    hl:SetColorTexture(1, 1, 1, 0.08)
-    hl:Hide()
+    local highlightOK, highlightDetail = EnsureStateTexture(btn, record, "highlight", "HIGHLIGHT", nil, 0.08)
+    local checkedOK, checkedDetail = EnsureStateTexture(btn, record, "checked", "OVERLAY", 1, 0.14, "ADD")
+    local pressedOK, pressedDetail = EnsureStateTexture(btn, record, "pressed", "OVERLAY", 2, 0.22, "ADD")
 
-    local ck = btn:CreateTexture(nil, "OVERLAY", nil, 1)
-    ck:SetAllPoints(btn)
-    ck:SetColorTexture(1, 1, 1, 0.14)
-    ck:SetBlendMode("ADD")
-    ck:Hide()
-
-    local pr = btn:CreateTexture(nil, "OVERLAY", nil, 2)
-    pr:SetAllPoints(btn)
-    pr:SetColorTexture(1, 1, 1, 0.22)
-    pr:SetBlendMode("ADD")
-    pr:Hide()
-
-    record.layers.highlight = hl
-    record.layers.checked = ck
-    record.layers.pressed = pr
+    local enterOK, enterDetail = EnsureScriptHook(
+        record,
+        btn,
+        "OnEnter",
+        "stateEnterHooked",
+        OnButtonStateEnter
+    )
+    local leaveOK, leaveDetail = EnsureScriptHook(
+        record,
+        btn,
+        "OnLeave",
+        "stateLeaveHooked",
+        OnButtonStateLeave
+    )
 
     local dhl = btn.GetHighlightTexture and btn:GetHighlightTexture()
-    if dhl then dhl:SetAlpha(0) end
+    if dhl and dhl.SetAlpha then pcall(dhl.SetAlpha, dhl, 0) end
     local dck = btn.GetCheckedTexture and btn:GetCheckedTexture()
-    if dck then dck:SetAlpha(0) end
+    if dck and dck.SetAlpha then pcall(dck.SetAlpha, dck, 0) end
     local pushed = btn.GetPushedTexture and btn:GetPushedTexture()
-    if pushed then pushed:SetAlpha(0) end
+    if pushed and pushed.SetAlpha then pcall(pushed.SetAlpha, pushed, 0) end
 
-    btn:HookScript("OnEnter", function(button)
-        local current = GetButtonRecord(button, false)
-        local owner = current and current.module
-        if owner and owner._detached == true then return end
-        local layer = current and current.layers and current.layers.highlight
-        if layer then layer:Show() end
-    end)
-    btn:HookScript("OnLeave", function(button)
-        local current = GetButtonRecord(button, false)
-        local layer = current and current.layers and current.layers.highlight
-        if layer then layer:Hide() end
-    end)
+    local complete = highlightOK and checkedOK and pressedOK and enterOK and leaveOK
+    record.stateLayers = complete == true
+    if complete then return true end
+    return false, highlightDetail or checkedDetail or pressedDetail or enterDetail or leaveDetail
 end
 
 local function EnsureSlotBG(btn)
     local record = GetButtonRecord(btn, true)
-    if not record or record.slotBackground then return end
+    if not record then return false, "ActionButton record unavailable" end
 
-    local bg = btn:CreateTexture(nil, "BACKGROUND")
-    bg:SetAllPoints(btn)
-    bg:SetColorTexture(1, 1, 1, 0.02)
-    bg:Hide()
-    record.slotBackground = bg
+    local bg = record.slotBackground
+    if not bg then
+        if type(btn.CreateTexture) ~= "function" then
+            return false, "ActionButton CreateTexture unavailable"
+        end
+        local ok, created = pcall(btn.CreateTexture, btn, nil, "BACKGROUND")
+        if not ok or not created then
+            return false, ok and "ActionButton slot background creation returned nil" or tostring(created)
+        end
+        bg = created
+        record.slotBackground = bg
+    end
+
+    local ok, detail = pcall(function()
+        bg:SetAllPoints(btn)
+        bg:SetColorTexture(1, 1, 1, 0.02)
+        bg:Hide()
+    end)
+    if not ok then
+        return false, tostring(detail)
+    end
+    return true
 end
 
 local function GetActionID(btn)
@@ -159,7 +247,8 @@ local function UpdateEmptySlot(btn)
     record = GetButtonRecord(btn, false)
 
     local holder = btn.GetParent and btn:GetParent() or nil
-    local holderAutoHidden = (holder and holder._fguiAutoHidden == true) or false
+    local holderRecord = GetHolderRecord(holder, false)
+    local holderAutoHidden = holderRecord and holderRecord.autoHidden == true or false
     local empty = IsEmptySlot(btn)
     local background = record and record.slotBackground
 
@@ -206,29 +295,46 @@ function State.InitializeButton(btn)
     local record = GetButtonRecord(btn, false)
     if not (btn and record and record.skinned) then return false end
 
-    EnsureSlotBG(btn)
-    EnsureStateLayers(btn)
+    local slotOK, slotDetail = EnsureSlotBG(btn)
+    local layersOK, layersDetail = EnsureStateLayers(btn)
+    if not slotOK or not layersOK then
+        return false, slotDetail or layersDetail
+    end
+
     UpdateButtonChecked(btn)
     UpdateEmptySlot(btn)
     return true
 end
 
+local function OnButtonAutoHideEdge(btn)
+    local record = GetButtonRecord(btn, false)
+    local owner = record and record.module
+    if owner then State.QueueAutoHideUpdate(owner) end
+end
+
 function State.AttachButtonAutoHideHooks(btn, module)
     local record = GetButtonRecord(btn, true)
-    if not record then return false end
+    if not record then return false, "ActionButton record unavailable" end
 
-    local owner = module or ns.ActionBars
-    record.module = owner
+    record.module = module or ns.ActionBars
+    local enterOK, enterDetail = EnsureScriptHook(
+        record,
+        btn,
+        "OnEnter",
+        "autoHideEnterHooked",
+        OnButtonAutoHideEdge
+    )
+    local leaveOK, leaveDetail = EnsureScriptHook(
+        record,
+        btn,
+        "OnLeave",
+        "autoHideLeaveHooked",
+        OnButtonAutoHideEdge
+    )
+
+    record.autoHideHooks = enterOK and leaveOK or false
     if record.autoHideHooks then return true end
-
-    record.autoHideHooks = true
-    btn:HookScript("OnEnter", function()
-        State.QueueAutoHideUpdate(owner)
-    end)
-    btn:HookScript("OnLeave", function()
-        State.QueueAutoHideUpdate(owner)
-    end)
-    return true
+    return false, enterDetail or leaveDetail
 end
 
 local function SetHolderButtonsMouse(holder, enabled)
@@ -249,13 +355,15 @@ end
 
 function State.SetHolderAutoHidden(holder, hidden)
     if not holder then
-        return
+        return false
     end
 
     hidden = (hidden == true)
-    holder._fguiAutoHidden = hidden
+    local record = GetHolderRecord(holder, true)
+    record.autoHidden = hidden
     holder:SetAlpha(hidden and 0 or 1)
     SetHolderButtonsMouse(holder, not hidden)
+    return true
 end
 
 function State.IsAnyHolderHovered(module)
@@ -349,26 +457,53 @@ function State.UpdateAutoHideState(module)
     end)
 end
 
+local function OnHolderAutoHideEdge(holder)
+    local record = GetHolderRecord(holder, false)
+    local owner = record and record.module
+    if owner then State.QueueAutoHideUpdate(owner) end
+end
+
 function State.EnsureAutoHideHooks(module)
-    if IsDetached(module) or module._autoHideHooksAttached or type(module._ForEachHolder) ~= "function" then
-        return
+    if IsDetached(module) then
+        return false, "ActionBars auto-hide owner detached"
+    end
+    if type(module._ForEachHolder) ~= "function" then
+        return false, "ActionBars holder iterator unavailable"
     end
 
-    module._autoHideHooksAttached = true
+    local allOK = true
+    local firstDetail
     module:_ForEachHolder(function(holder)
-        if not holder or holder._fguiAutoHideHooks then
-            return
-        end
+        if not holder then return end
 
-        holder._fguiAutoHideHooks = true
+        local record = GetHolderRecord(holder, true)
+        record.module = module
         SetMouseEnabledSafe(holder, true)
-        holder:HookScript("OnEnter", function()
-            State.QueueAutoHideUpdate(module)
-        end)
-        holder:HookScript("OnLeave", function()
-            State.QueueAutoHideUpdate(module)
-        end)
+
+        local enterOK, enterDetail = EnsureScriptHook(
+            record,
+            holder,
+            "OnEnter",
+            "autoHideEnterHooked",
+            OnHolderAutoHideEdge
+        )
+        local leaveOK, leaveDetail = EnsureScriptHook(
+            record,
+            holder,
+            "OnLeave",
+            "autoHideLeaveHooked",
+            OnHolderAutoHideEdge
+        )
+
+        record.autoHideHooks = enterOK and leaveOK or false
+        if not record.autoHideHooks then
+            allOK = false
+            firstDetail = firstDetail or enterDetail or leaveDetail
+        end
     end)
+
+    if allOK then return true end
+    return false, firstDetail or "ActionBars holder auto-hide hook registration failed"
 end
 
 local function RunButtonVisualSync(module, btn, updateChecked, updateEmpty)
