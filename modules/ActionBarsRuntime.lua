@@ -149,26 +149,46 @@ end
 local function AssignButtons(module, holder, prefix, style, showHotkeys)
     local buttons = CollectButtons(prefix)
     if not buttons then
-        return false
+        return false, "ActionButtons unavailable for " .. tostring(prefix)
     end
 
+    local allOK = true
+    local firstDetail
     for i = 1, BUTTONS_PER_BAR do
         local button = buttons[i]
         holder.buttons[i] = button
 
+        local skinOK = true
         if Visuals and Visuals.SkinButton then
-            Visuals.SkinButton(button, style)
+            local ok, detail = Visuals.SkinButton(button, style)
+            if ok == false then
+                skinOK = false
+                allOK = false
+                firstDetail = firstDetail
+                    or (tostring(prefix) .. tostring(i) .. ": " .. tostring(detail or "skin initialization failed"))
+            end
         end
-        if Visuals and Visuals.RefreshButtonVisualState then
-            Visuals.RefreshButtonVisualState(button, style, showHotkeys)
+        if skinOK and Visuals and Visuals.RefreshButtonVisualState then
+            local ok, detail = Visuals.RefreshButtonVisualState(button, style, showHotkeys)
+            if ok == false then
+                allOK = false
+                firstDetail = firstDetail
+                    or (tostring(prefix) .. tostring(i) .. ": " .. tostring(detail or "visual refresh failed"))
+            end
         end
 
         if State and State.AttachButtonAutoHideHooks then
-            State.AttachButtonAutoHideHooks(button, module)
+            local ok, detail = State.AttachButtonAutoHideHooks(button, module)
+            if ok == false then
+                allOK = false
+                firstDetail = firstDetail
+                    or (tostring(prefix) .. tostring(i) .. ": " .. tostring(detail or "auto-hide hook registration failed"))
+            end
         end
     end
 
-    return true
+    if allOK then return true end
+    return false, firstDetail
 end
 
 local function ApplyHolderHotkeys(holder, showHotkeys)
@@ -186,7 +206,7 @@ end
 
 local function ApplyBarHolderConfig(module, holder, cfg, styleCfg, size, spacing, showHotkeys)
     if not holder then
-        return false
+        return false, "ActionBar holder unavailable"
     end
 
     cfg = (type(cfg) == "table") and cfg or {}
@@ -201,10 +221,10 @@ local function ApplyBarHolderConfig(module, holder, cfg, styleCfg, size, spacing
         return true
     end
 
-    local ok = AssignButtons(module, holder, prefix, styleCfg, showHotkeys)
+    local ok, detail = AssignButtons(module, holder, prefix, styleCfg, showHotkeys)
     if not ok then
         holder:Hide()
-        return false
+        return false, detail
     end
 
     LayoutHolder(holder, cfg.buttons or 12, cfg.rows or 1, size, spacing)
@@ -340,16 +360,19 @@ function Runtime.PreviewMoverLayout(module, size, spacing)
     local showHotkeys = (ab.showHotkeys == true)
     local styleCfg = (Visuals and Visuals.BuildStyleConfig and Visuals.BuildStyleConfig(size)) or {}
     local allOk = true
+    local firstDetail
 
     for id = 1, ACTION_BAR_COUNT do
         local holder = module.bars and module.bars[id]
-        if not ApplyBarHolderConfig(module, holder, barsCfg[id], styleCfg, size, spacing, showHotkeys) then
+        local ok, detail = ApplyBarHolderConfig(module, holder, barsCfg[id], styleCfg, size, spacing, showHotkeys)
+        if not ok then
             allOk = false
+            firstDetail = firstDetail or ("ActionBar " .. tostring(id) .. ": " .. tostring(detail or "apply failed"))
         end
     end
 
     if not allOk then
-        return false, "ActionBars preview could not acquire every button"
+        return false, firstDetail or "ActionBars preview could not acquire every button"
     end
     return true
 end
@@ -360,15 +383,21 @@ function Runtime.ApplyNow(module)
         if Log and type(Log.Error) == "function" then
             Log:Error("ActionBarsRuntime.ApplyNow: DB not initialized")
         end
-        return false
+        return false, "ActionBars DB unavailable"
     end
     if not IsReady(module) or IsDetached(module) then
-        return false
+        return false, "ActionBars apply owner unavailable"
     end
 
     local ab = GetActionBarsCfg()
     module:EnsureCreated()
-    module:EnsureAutoHideHooks()
+    local hooksOK, hooksDetail = module:EnsureAutoHideHooks()
+    if hooksOK == false then
+        if Log and type(Log.Warn) == "function" then
+            Log:Warn("ActionBars auto-hide hook registration failed: " .. tostring(hooksDetail))
+        end
+        return false, "ActionBars auto-hide hook registration failed: " .. tostring(hooksDetail)
+    end
 
     local autoHide = (type(ab.autoHide) == "table") and ab.autoHide or nil
     module._autoHideEnabled = autoHide and autoHide.enabled == true or false
@@ -392,16 +421,19 @@ function Runtime.ApplyNow(module)
     local styleCfg = (Visuals and Visuals.BuildStyleConfig and Visuals.BuildStyleConfig(size)) or {}
 
     local allOk = true
+    local firstDetail
     for id = 1, ACTION_BAR_COUNT do
         local holder = module.bars[id]
         local cfg = barsCfg[id]
-        if not ApplyBarHolderConfig(module, holder, cfg, styleCfg, size, spacing, showHotkeys) then
+        local ok, detail = ApplyBarHolderConfig(module, holder, cfg, styleCfg, size, spacing, showHotkeys)
+        if not ok then
             allOk = false
+            firstDetail = firstDetail or ("ActionBar " .. tostring(id) .. ": " .. tostring(detail or "apply failed"))
         end
     end
 
     if not allOk then
-        return false
+        return false, firstDetail or "ActionBars could not acquire every button"
     end
 
     if Shell then
@@ -426,11 +458,11 @@ function Runtime.ApplyConfig(module)
         return false
     end
 
-    local ok = Runtime.ApplyNow(module)
+    local ok, detail = Runtime.ApplyNow(module)
     if not ok then
         module._pending = true
     end
-    return ok
+    return ok, detail
 end
 
 function Runtime.QueueInitialApply(module, delay)

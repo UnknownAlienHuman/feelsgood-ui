@@ -231,7 +231,10 @@ function Visuals.SkinButton(btn, style)
         Visuals.StyleButtonCooldown(btn, style)
     end
 
-    if State and State.InitializeButton then State.InitializeButton(btn) end
+    if State and State.InitializeButton then
+        local ok, detail = State.InitializeButton(btn)
+        if ok == false then return false, detail end
+    end
     return true
 end
 
@@ -267,7 +270,10 @@ function Visuals.RefreshButtonVisualState(btn, style, showHotkeys)
     end
 
     Visuals.SetButtonHotkey(btn, record.showHotkeys == true)
-    if State and State.InitializeButton then State.InitializeButton(btn) end
+    if State and State.InitializeButton then
+        local ok, detail = State.InitializeButton(btn)
+        if ok == false then return false, detail end
+    end
     if State and State.UpdateButtonChecked then State.UpdateButtonChecked(btn) end
     if State and State.UpdateButtonEmpty then State.UpdateButtonEmpty(btn) end
     return true
