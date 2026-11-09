@@ -527,42 +527,47 @@ local function SetBarVisible(bar, shouldShow, immediate)
 end
 
 local function EnsureFrame(module)
-    if module._bar then
-        return module._bar
+    local bar = module._bar
+    if not bar then
+        bar = CreateFrame("StatusBar", "FGUI_XPBar", UIParent)
+        bar:SetSize(420, 10)
+        bar:SetPoint("CENTER", UIParent, "CENTER", 0, -296)
+        bar:SetMinMaxValues(0, 1)
+        bar:SetValue(0)
+        bar:SetFrameStrata("LOW")
+        bar:SetFrameLevel(10)
+        bar:SetStatusBarTexture("Interface/Buttons/WHITE8x8")
+        bar._fguiVisible = true
+
+        bar.bg = bar:CreateTexture(nil, "BACKGROUND")
+        bar.bg:SetAllPoints()
+        bar.bg:SetColorTexture(0.07, 0.07, 0.07, 1)
+
+        bar.rested = bar:CreateTexture(nil, "ARTWORK")
+        bar.rested:SetColorTexture(0.15, 0.35, 0.80, 0.55)
+        bar.rested:Hide()
+
+        bar.text = bar:CreateFontString(nil, "OVERLAY")
+        bar.text:SetPoint("CENTER", bar, "CENTER", 0, 0)
+        bar.text:SetJustifyH("CENTER")
+        bar.text:SetText("")
+
+        if Media and Media.CreateBorder then
+            Media:CreateBorder(bar)
+        end
+        module._bar = bar
     end
 
-    local bar = CreateFrame("StatusBar", "FGUI_XPBar", UIParent)
-    bar:SetSize(420, 10)
-    bar:SetPoint("CENTER", UIParent, "CENTER", 0, -296)
-    bar:SetMinMaxValues(0, 1)
-    bar:SetValue(0)
-    bar:SetFrameStrata("LOW")
-    bar:SetFrameLevel(10)
-    bar:SetStatusBarTexture("Interface/Buttons/WHITE8x8")
-    bar._fguiVisible = true
-
-    bar.bg = bar:CreateTexture(nil, "BACKGROUND")
-    bar.bg:SetAllPoints()
-    bar.bg:SetColorTexture(0.07, 0.07, 0.07, 1)
-
-    bar.rested = bar:CreateTexture(nil, "ARTWORK")
-    bar.rested:SetColorTexture(0.15, 0.35, 0.80, 0.55)
-    bar.rested:Hide()
-
-    bar.text = bar:CreateFontString(nil, "OVERLAY")
-    bar.text:SetPoint("CENTER", bar, "CENTER", 0, 0)
-    bar.text:SetJustifyH("CENTER")
-    bar.text:SetText("")
-
-    if Media and Media.CreateBorder then
-        Media:CreateBorder(bar)
+    if not (Movers and type(Movers.Register) == "function" and type(Movers.Apply) == "function") then
+        return nil, "ExperienceBar mover registry unavailable"
     end
-
-    module._bar = bar
-
-    if Movers and Movers.Register then
-        Movers:Register("xpbar", bar, CreateMoverSpec())
-        Movers:Apply("xpbar", bar)
+    local registered, registerDetail = Movers:Register("xpbar", bar, CreateMoverSpec())
+    if registered == false then
+        return nil, "ExperienceBar mover registration failed: " .. tostring(registerDetail)
+    end
+    local applied, applyDetail = Movers:Apply("xpbar", bar)
+    if applied == false then
+        return nil, "ExperienceBar mover apply failed: " .. tostring(applyDetail)
     end
 
     return bar
@@ -785,7 +790,8 @@ end
 
 function XP:Update()
     local cfg, profile = GetCfg()
-    local bar = EnsureFrame(self)
+    local bar, frameDetail = EnsureFrame(self)
+    if not bar then return false, frameDetail end
 
     if not cfg.enabled then
         SetBarVisible(bar, false, false)
@@ -837,6 +843,7 @@ function XP:Update()
     end
 
     SetBarVisible(bar, true, false)
+    return true
 end
 
 local function EnsureEventFrame(module)
@@ -938,11 +945,10 @@ end
 function XP:Init()
     if self._inited then return true end
 
-    local bar = EnsureFrame(self)
+    local bar, frameDetail = EnsureFrame(self)
     local events = EnsureEventFrame(self)
-    if not (bar and events) then
-        return false, "ExperienceBar initialization failed"
-    end
+    if not bar then return false, frameDetail end
+    if not events then return false, "ExperienceBar event owner unavailable" end
 
     self._inited = true
     if Log and Log.Debug then

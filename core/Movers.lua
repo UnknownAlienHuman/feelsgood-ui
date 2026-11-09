@@ -236,6 +236,125 @@ local function AbortOverlayInteraction(overlay)
     SetOverlayActiveVisual(overlay, false)
 end
 
+local RETIRED_OVERLAY_SCRIPTS = {
+    "OnShow",
+    "OnHide",
+    "OnClick",
+    "OnEnter",
+    "OnLeave",
+    "OnDragStart",
+    "OnDragStop",
+    "OnMouseWheel",
+    "OnUpdate",
+}
+
+local RETIRED_HANDLE_SCRIPTS = {
+    "OnEnter",
+    "OnLeave",
+    "OnMouseDown",
+    "OnMouseUp",
+    "OnUpdate",
+}
+
+local function ConfigureMoverFrame(frame)
+    if not frame then return false, "Mover frame unavailable" end
+    if type(frame.SetMovable) ~= "function" then
+        return false, "Mover frame lacks SetMovable"
+    end
+    if type(frame.SetClampedToScreen) ~= "function" then
+        return false, "Mover frame lacks SetClampedToScreen"
+    end
+
+    local movableOK, movableDetail = pcall(frame.SetMovable, frame, true)
+    if not movableOK then
+        return false, "SetMovable failed: " .. tostring(movableDetail)
+    end
+    local clampOK, clampDetail = pcall(frame.SetClampedToScreen, frame, true)
+    if not clampOK then
+        return false, "SetClampedToScreen failed: " .. tostring(clampDetail)
+    end
+    return true
+end
+
+local function ClearScripts(target, scripts)
+    if not (target and type(target.SetScript) == "function") then return end
+    for i = 1, #scripts do
+        pcall(target.SetScript, target, scripts[i], nil)
+    end
+end
+
+local function RetireMoverEntry(owner, entry)
+    if type(entry) ~= "table" or entry.retired == true then return end
+
+    local overlay = entry.overlay
+    if overlay then
+        AbortOverlayInteraction(overlay)
+        ClearScripts(overlay, RETIRED_OVERLAY_SCRIPTS)
+        overlay._cancelPreview = nil
+        if type(overlay.EnableMouse) == "function" then
+            pcall(overlay.EnableMouse, overlay, false)
+        end
+
+        local handle = overlay.handle
+        if handle then
+            ClearScripts(handle, RETIRED_HANDLE_SCRIPTS)
+            if type(handle.EnableMouse) == "function" then
+                pcall(handle.EnableMouse, handle, false)
+            end
+            if type(handle.Hide) == "function" then pcall(handle.Hide, handle) end
+        end
+        if type(overlay.Hide) == "function" then pcall(overlay.Hide, overlay) end
+    end
+
+    if owner._activeOverlay == overlay or owner._activeKey == entry.key then
+        owner._activeKey = nil
+        owner._activeOverlay = nil
+        HideGuides()
+        HideInspector()
+    end
+
+    entry.retired = true
+    entry._handleRefresh = nil
+end
+
+local function CreateMoverEntry(key, frame, descriptor)
+    local configured, configureDetail = ConfigureMoverFrame(frame)
+    if not configured then return nil, configureDetail end
+
+    local created, overlay, handleRefresh = pcall(
+        CreateOverlay,
+        key,
+        frame,
+        descriptor.label
+    )
+    if not created then
+        return nil, "Mover overlay creation failed: " .. tostring(overlay)
+    end
+    if not overlay then
+        return nil, "Mover overlay creation returned nil"
+    end
+
+    return {
+        key = key,
+        frame = frame,
+        overlay = overlay,
+        label = descriptor.label,
+        spec = descriptor,
+        _handleRefresh = handleRefresh,
+    }
+end
+
+local function RefreshEntryHandle(entry)
+    if not (entry and type(entry._handleRefresh) == "function") then
+        return true
+    end
+    local ok, detail = pcall(entry._handleRefresh)
+    if not ok then
+        return false, "Mover handle refresh failed: " .. tostring(detail)
+    end
+    return true
+end
+
 function Movers:GetEntry(key)
     if type(key) ~= "string" or key == "" then
         return nil
@@ -300,7 +419,12 @@ function Movers:RequestApplyFor(key)
 end
 
 function Movers:Register(key, frame, label, spec)
-    if not key or not frame or self._registered[key] then return end
+    if type(key) ~= "string" or key == "" then
+        return false, "Mover registration key is required"
+    end
+    if not frame then
+        return false, "Mover frame is required for " .. key
+    end
 
     if type(label) == "table" and spec == nil then
         spec = label
@@ -308,38 +432,75 @@ function Movers:Register(key, frame, label, spec)
     end
 
     local descriptor = NormalizeRegistrationSpec(key, label, spec)
+    local existing = self._registered[key]
+    if existing and existing.frame == frame and existing.retired ~= true then
+        local configured, configureDetail = ConfigureMoverFrame(frame)
+        if not configured then return false, key .. ": " .. tostring(configureDetail) end
 
-    frame:SetMovable(true)
-    frame:SetClampedToScreen(true)
+        existing.label = descriptor.label
+        existing.spec = descriptor
+        existing.key = key
+        if existing.overlay and existing.overlay.text and type(existing.overlay.text.SetText) == "function" then
+            pcall(existing.overlay.text.SetText, existing.overlay.text, descriptor.label)
+        end
+        local refreshed, refreshDetail = RefreshEntryHandle(existing)
+        if not refreshed then return false, key .. ": " .. tostring(refreshDetail) end
+        return true, "reused"
+    end
 
-    local overlay, handleRefresh = CreateOverlay(key, frame, descriptor.label)
-    if self._unlocked then overlay:Show() else overlay:Hide() end
+    local replacement, createDetail = CreateMoverEntry(key, frame, descriptor)
+    if not replacement then
+        return false, key .. ": " .. tostring(createDetail)
+    end
 
-    self._registered[key] = {
-        frame = frame,
-        overlay = overlay,
-        label = descriptor.label,
-        spec = descriptor,
-        _handleRefresh = handleRefresh,
-    }
+    self._registered[key] = replacement
+    if self._unlocked then replacement.overlay:Show() else replacement.overlay:Hide() end
+    local refreshed, refreshDetail = RefreshEntryHandle(replacement)
+    if not refreshed then
+        self._registered[key] = existing
+        RetireMoverEntry(self, replacement)
+        return false, key .. ": " .. tostring(refreshDetail)
+    end
+
+    if existing then
+        RetireMoverEntry(self, existing)
+    end
+    return true, existing and "replaced" or "registered"
 end
 
 function Movers:Apply(key, frame)
+    if type(key) ~= "string" or key == "" then
+        return false, "Mover apply key is required"
+    end
+
     local entry = self:GetEntry(key)
     local target = frame or (entry and entry.frame) or nil
     if not target then
-        return
+        return false, "Mover frame unavailable for " .. key
     end
 
-    ApplyStoredPoint(key, target, entry and entry.spec or nil)
+    local ok, normalized = pcall(ApplyStoredPoint, key, target, entry and entry.spec or nil)
+    if not ok then
+        return false, key .. ": mover position apply failed: " .. tostring(normalized)
+    end
+    if type(normalized) ~= "table" then
+        return false, key .. ": stored mover position unavailable"
+    end
+    return true, normalized
 end
 
 function Movers:ReapplyAll()
+    local firstDetail
     for key, entry in pairs(self._registered) do
-        if entry and entry.frame then
-            self:Apply(key, entry.frame)
+        if entry and entry.frame and entry.retired ~= true then
+            local applied, detail = self:Apply(key, entry.frame)
+            if applied == false and not firstDetail then
+                firstDetail = tostring(detail)
+            end
         end
     end
+    if firstDetail then return false, firstDetail end
+    return true
 end
 
 function Movers:ResetPositions()
@@ -502,11 +663,11 @@ function Movers:SyncFromProfile()
     self:ClearActiveInteraction()
     local movers = GetProfileSection("movers")
     ApplyUnlockedState(self, movers.unlocked, { silent = true })
-    self:RefreshEditorSettings()
+    return self:RefreshEditorSettings()
 end
 
 function Movers:ApplyUnlockFromDB()
-    self:SyncFromProfile()
+    return self:SyncFromProfile()
 end
 
 function Movers:RefreshEditorSettings()
@@ -514,11 +675,17 @@ function Movers:RefreshEditorSettings()
     if self._unlocked then
         SetGridVisible(true)
     end
+    local firstDetail
     for _, entry in pairs(self._registered) do
-        if entry and entry._handleRefresh then
-            entry._handleRefresh()
+        if entry and entry.retired ~= true then
+            local refreshed, detail = RefreshEntryHandle(entry)
+            if refreshed == false and not firstDetail then
+                firstDetail = tostring(detail)
+            end
         end
     end
+    if firstDetail then return false, firstDetail end
+    return true
 end
 
 function Movers:ApplyConfig()
@@ -529,8 +696,11 @@ function Movers:ApplyConfig()
     self:ClearActiveInteraction()
     local movers = GetProfileSection("movers")
     ApplyUnlockedState(self, movers.unlocked == true, { silent = true })
-    self:ReapplyAll()
-    self:RefreshEditorSettings()
+
+    local applied, applyDetail = self:ReapplyAll()
+    if applied == false then return false, applyDetail end
+    local refreshed, refreshDetail = self:RefreshEditorSettings()
+    if refreshed == false then return false, refreshDetail end
     return true
 end
 

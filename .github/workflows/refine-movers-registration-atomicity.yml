@@ -1,0 +1,93 @@
+name: Refine mover registration atomicity
+
+on:
+  push:
+    branches:
+      - codex/movers-registration-lifecycle
+
+permissions:
+  contents: write
+
+jobs:
+  refine:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Apply atomicity refinement
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .codex/refine_movers_registration_atomicity.py
+          python .codex/fix_mover_replacement_refresh.py
+          python .codex/fix_mover_readiness_ownership.py
+          git diff --check
+
+      - name: Audit atomic ownership contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          movers = Path('core/Movers.lua').read_text()
+          xp = Path('modules/ExperienceBar.lua').read_text()
+          pet = Path('modules/CompanionPetBar.lua').read_text()
+          micro = Path('modules/CompanionMicroBags.lua').read_text()
+          check = Path('check_lua.js').read_text()
+
+          required = [
+              'supplied frame does not own mover key',
+              'local function PresentUnlockedState(owner, unlocked)',
+              'owner._unlocked = previous',
+              'existing.spec = previousSpec',
+              'local visible, visibilityDetail = SetEntryOverlayVisible',
+              'local refreshed, refreshDetail = false, nil',
+          ]
+          for needle in required:
+              assert needle in movers, f'missing mover atomicity contract: {needle}'
+
+          assert 'visible and RefreshEntryHandle(replacement)' not in movers
+          assert 'module._moverReadyFrame ~= bar or not moverEntry or moverEntry.frame ~= bar' in xp
+          assert 'module._petMoverReadyFrame ~= frame or not moverEntry or moverEntry.frame ~= frame' in pet
+          assert 'module._microMoverReadyFrame ~= frame or not moverEntry or moverEntry.frame ~= frame' in micro
+          assert 'local updated, updateDetail = self:Update()' in xp
+          assert 'supplied frame does not own mover key' in check
+          print('Mover registration atomicity audit passed.')
+          PY
+
+      - name: Install Lua 5.1
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v lua5.1 >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y lua5.1
+          fi
+
+      - name: Run mover atomicity harness
+        run: lua5.1 .codex/test_movers_registration_atomicity.lua
+
+      - name: Validate addon
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm test
+
+      - name: Commit validated refinement
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .codex
+          rm -f .github/workflows/refine-movers-registration-atomicity.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Make mover replacement atomic" -m "Roll back same-frame descriptor updates and unlock presentation on failure, reject stale frame apply, prepare replacements before retiring prior owners, and retain frame-specific mover readiness in hot paths."
+          git push origin HEAD:codex/movers-registration-lifecycle
