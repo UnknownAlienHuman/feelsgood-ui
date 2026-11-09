@@ -56,6 +56,7 @@ Execution rule: every run records the exact client build, addon revision, result
 | 25 | Full combat smoke with taint logging enabled | No `ADDON_ACTION_BLOCKED`, `ADDON_ACTION_FORBIDDEN`, or repeating errors |  |  |
 | 26 | Inject one feature attach/apply failure while other families are valid | Failed feature cleans up and remains disabled; later families still enable; exact owner/error is reported |  |  |
 | 27 | Delete one core/feature section after DB initialization, then exercise all runtime readers and settings pages | No read path recreates SavedVariables data; explicit `EnsureSection`/Settings normalization repairs the section once |  |  |
+| 28 | Rebuild/show/resize Options pages with injected partial HookScript/listener failure | Weak registries own hooks/listeners; successful edges stay single, missing edges retry, wheel forwarding fires once, and no widget/panel `_fgui*` markers remain |  |  |
 
 ## Required smoke order
 

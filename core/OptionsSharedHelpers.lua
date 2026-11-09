@@ -15,6 +15,333 @@ local L = ns.L or function(text) return text end
 local Shared = ns.OptionsShared or {}
 ns.OptionsShared = Shared
 
+local adaptiveOwnerRegistry = setmetatable({}, { __mode = "k" })
+local adaptiveWidgetRegistry = setmetatable({}, { __mode = "k" })
+local numericParentRegistry = setmetatable({}, { __mode = "k" })
+local numericSliderRegistry = setmetatable({}, { __mode = "k" })
+local wheelProxyRegistry = setmetatable({}, { __mode = "k" })
+
+Shared._adaptiveOwnerRegistry = adaptiveOwnerRegistry
+Shared._adaptiveWidgetRegistry = adaptiveWidgetRegistry
+Shared._numericParentRegistry = numericParentRegistry
+Shared._numericSliderRegistry = numericSliderRegistry
+Shared._wheelProxyRegistry = wheelProxyRegistry
+
+local function HookError(scope, record, key, detail)
+    detail = tostring(detail or "unknown hook error")
+    record.errors = record.errors or {}
+    if record.errors[key] == detail then return end
+    record.errors[key] = detail
+    if Log and type(Log.Warn) == "function" then
+        Log:Warn(tostring(scope) .. ": " .. detail)
+    end
+end
+
+local function ClearHookError(record, key)
+    if type(record.errors) == "table" then
+        record.errors[key] = nil
+    end
+end
+
+local function TryHookScript(target, event, callback)
+    if not (target and type(target.HookScript) == "function") then
+        return false, tostring(event) .. " HookScript unavailable"
+    end
+    local ok, err = pcall(target.HookScript, target, event, callback)
+    if not ok then
+        return false, tostring(err)
+    end
+    return true
+end
+
+local function EnsureHook(record, target, event, field, callback, scope)
+    if record[field] == true then return true end
+    local ok, detail = TryHookScript(target, event, callback)
+    if ok then
+        record[field] = true
+        ClearHookError(record, field)
+        return true
+    end
+    HookError(scope, record, field, detail)
+    return false, detail
+end
+
+local function ApplyAdaptiveWidget(widget)
+    local record = adaptiveWidgetRegistry[widget]
+    if not (record and record.active and type(record.apply) == "function") then
+        return false
+    end
+
+    local ok, detail = pcall(record.apply, widget, record.owner)
+    if ok then
+        record.applyError = nil
+        return true
+    end
+
+    detail = tostring(detail)
+    if record.applyError ~= detail then
+        record.applyError = detail
+        if Log and type(Log.Warn) == "function" then
+            Log:Warn("Options adaptive width callback failed: " .. detail)
+        end
+    end
+    return false
+end
+
+local function ApplyAdaptiveOwner(owner)
+    local ownerRecord = adaptiveOwnerRegistry[owner]
+    if not ownerRecord then return end
+
+    for widget in pairs(ownerRecord.widgets) do
+        local record = adaptiveWidgetRegistry[widget]
+        if record and record.owner == owner and record.active then
+            ApplyAdaptiveWidget(widget)
+        else
+            ownerRecord.widgets[widget] = nil
+        end
+    end
+end
+
+local function OnAdaptiveOwnerChanged(owner)
+    ApplyAdaptiveOwner(owner)
+end
+
+local function OnAdaptiveWidgetShown(widget)
+    ApplyAdaptiveWidget(widget)
+end
+
+local function HookAdaptiveWidth(widget, owner, applyFn)
+    if not (widget and owner and type(applyFn) == "function") then
+        return false, "Adaptive width registration requires widget, owner, and callback"
+    end
+
+    local previous = adaptiveWidgetRegistry[widget]
+    if previous and previous.owner ~= owner then
+        previous.active = false
+        local previousOwner = adaptiveOwnerRegistry[previous.owner]
+        if previousOwner then previousOwner.widgets[widget] = nil end
+    end
+
+    local ownerRecord = adaptiveOwnerRegistry[owner]
+    if not ownerRecord then
+        ownerRecord = {
+            widgets = setmetatable({}, { __mode = "k" }),
+        }
+        adaptiveOwnerRegistry[owner] = ownerRecord
+    end
+
+    local record = previous or { owner = owner, active = true }
+    record.owner = owner
+    record.apply = applyFn
+    record.active = true
+    adaptiveWidgetRegistry[widget] = record
+    ownerRecord.widgets[widget] = true
+
+    local applied = ApplyAdaptiveWidget(widget)
+    local sizeHooked, sizeDetail = EnsureHook(
+        ownerRecord,
+        owner,
+        "OnSizeChanged",
+        "sizeHooked",
+        OnAdaptiveOwnerChanged,
+        "Options adaptive owner hook"
+    )
+    local ownerShowHooked, ownerShowDetail = EnsureHook(
+        ownerRecord,
+        owner,
+        "OnShow",
+        "showHooked",
+        OnAdaptiveOwnerChanged,
+        "Options adaptive owner hook"
+    )
+    local widgetShowHooked, widgetShowDetail = EnsureHook(
+        record,
+        widget,
+        "OnShow",
+        "showHooked",
+        OnAdaptiveWidgetShown,
+        "Options adaptive widget hook"
+    )
+
+    if applied and sizeHooked and ownerShowHooked and widgetShowHooked then
+        return true
+    end
+    return false, sizeDetail or ownerShowDetail or widgetShowDetail or "Adaptive width callback failed"
+end
+
+local function SyncNumericSlider(slider)
+    local record = numericSliderRegistry[slider]
+    if not (record and record.active and record.editBox and type(record.format) == "function") then
+        return false
+    end
+    if record.updating then return true end
+
+    record.updating = true
+    local ok, detail = pcall(function()
+        record.editBox:SetText(record.format(slider:GetValue()))
+    end)
+    record.updating = false
+
+    if ok then
+        record.syncError = nil
+        return true
+    end
+    detail = tostring(detail)
+    if record.syncError ~= detail then
+        record.syncError = detail
+        if Log and type(Log.Warn) == "function" then
+            Log:Warn("Options numeric slider sync failed: " .. detail)
+        end
+    end
+    return false
+end
+
+local function SyncNumericParent(parent)
+    local parentRecord = numericParentRegistry[parent]
+    if not parentRecord then return end
+    for slider in pairs(parentRecord.sliders) do
+        local record = numericSliderRegistry[slider]
+        if record and record.parent == parent and record.active then
+            SyncNumericSlider(slider)
+        else
+            parentRecord.sliders[slider] = nil
+        end
+    end
+end
+
+local function OnNumericSliderChanged(slider)
+    SyncNumericSlider(slider)
+end
+
+local function OnNumericParentShown(parent)
+    SyncNumericParent(parent)
+end
+
+local function RegisterNumericSliderSync(slider, parent, editBox, formatFn)
+    if not (slider and parent and editBox and type(formatFn) == "function") then
+        return false, "Numeric slider sync requires slider, parent, edit box, and formatter"
+    end
+
+    local previous = numericSliderRegistry[slider]
+    if previous and previous.parent ~= parent then
+        previous.active = false
+        local previousParent = numericParentRegistry[previous.parent]
+        if previousParent then previousParent.sliders[slider] = nil end
+    end
+
+    local parentRecord = numericParentRegistry[parent]
+    if not parentRecord then
+        parentRecord = {
+            sliders = setmetatable({}, { __mode = "k" }),
+        }
+        numericParentRegistry[parent] = parentRecord
+    end
+
+    local record = previous or { parent = parent, active = true }
+    record.parent = parent
+    record.editBox = editBox
+    record.format = formatFn
+    record.active = true
+    numericSliderRegistry[slider] = record
+    parentRecord.sliders[slider] = true
+
+    local valueHooked, valueDetail = EnsureHook(
+        record,
+        slider,
+        "OnValueChanged",
+        "valueHooked",
+        OnNumericSliderChanged,
+        "Options numeric slider hook"
+    )
+    local showHooked, showDetail = EnsureHook(
+        record,
+        slider,
+        "OnShow",
+        "showHooked",
+        OnNumericSliderChanged,
+        "Options numeric slider hook"
+    )
+    local parentHooked, parentDetail = EnsureHook(
+        parentRecord,
+        parent,
+        "OnShow",
+        "showHooked",
+        OnNumericParentShown,
+        "Options numeric parent hook"
+    )
+
+    local synced = SyncNumericSlider(slider)
+    if valueHooked and showHooked and parentHooked and synced then
+        return true
+    end
+    return false, valueDetail or showDetail or parentDetail or "Numeric slider sync failed"
+end
+
+local function OnWheelProxy(frame, delta)
+    local record = wheelProxyRegistry[frame]
+    if not (record and record.active and type(record.scrollByDelta) == "function") then
+        return
+    end
+
+    local ok, detail = pcall(record.scrollByDelta, record.scroll, delta)
+    if ok then
+        record.dispatchError = nil
+        return
+    end
+    detail = tostring(detail)
+    if record.dispatchError ~= detail then
+        record.dispatchError = detail
+        if Log and type(Log.Warn) == "function" then
+            Log:Warn("Options wheel proxy failed: " .. detail)
+        end
+    end
+end
+
+local function AttachWheelProxy(frame, scroll, scrollByDelta)
+    if not (frame and scroll and type(scrollByDelta) == "function") then
+        return false, "Wheel proxy requires frame, scroll owner, and callback"
+    end
+
+    local record = wheelProxyRegistry[frame]
+    if not record then
+        record = { active = true }
+        wheelProxyRegistry[frame] = record
+    end
+    record.active = true
+    record.scroll = scroll
+    record.scrollByDelta = scrollByDelta
+
+    local enabled = record.mouseWheelEnabled == true
+    local enableDetail
+    if not enabled then
+        if type(frame.EnableMouseWheel) ~= "function" then
+            enableDetail = "EnableMouseWheel unavailable"
+        else
+            local ok, detail = pcall(frame.EnableMouseWheel, frame, true)
+            if ok then
+                record.mouseWheelEnabled = true
+                ClearHookError(record, "mouseWheelEnabled")
+                enabled = true
+            else
+                enableDetail = tostring(detail)
+                HookError("Options wheel proxy", record, "mouseWheelEnabled", enableDetail)
+            end
+        end
+    end
+
+    local hooked, hookDetail = EnsureHook(
+        record,
+        frame,
+        "OnMouseWheel",
+        "hooked",
+        OnWheelProxy,
+        "Options wheel proxy hook"
+    )
+
+    if enabled and hooked then return true end
+    return false, enableDetail or hookDetail or "Wheel proxy registration failed"
+end
+
 local function SetWidgetText(widget, text)
     if not widget then return end
 
@@ -35,31 +362,6 @@ local function SetWidgetText(widget, text)
     end
     if fs and fs.SetText then
         fs:SetText(text)
-    end
-end
-
-local function HookAdaptiveWidth(widget, owner, applyFn)
-    if not (widget and owner and type(applyFn) == "function") then
-        return
-    end
-
-    local function SafeApply()
-        local ok = pcall(applyFn)
-        if not ok then
-            -- noop: avoid breaking settings panel if width calc fails on hidden frames.
-        end
-    end
-
-    SafeApply()
-    if not widget._fguiAdaptiveWidthHooked then
-        widget._fguiAdaptiveWidthHooked = true
-        if owner.HookScript then
-            owner:HookScript("OnSizeChanged", SafeApply)
-            owner:HookScript("OnShow", SafeApply)
-        end
-        if widget.HookScript then
-            widget:HookScript("OnShow", SafeApply)
-        end
     end
 end
 
@@ -85,11 +387,11 @@ local function CreateNote(parent, text, anchor, x, y)
     fs:SetJustifyH("LEFT")
     fs:SetWordWrap(true)
     fs:SetText(L(text))
-    HookAdaptiveWidth(fs, parent, function()
-        local pw = tonumber(parent:GetWidth()) or 620
+    HookAdaptiveWidth(fs, parent, function(target, container)
+        local pw = tonumber(container:GetWidth()) or 620
         local newWidth = math.floor(pw - 44)
         if newWidth < 180 then newWidth = 180 end
-        fs:SetWidth(newWidth)
+        target:SetWidth(newWidth)
     end)
     return fs
 end
@@ -133,13 +435,13 @@ local function CreateSlider(parent, label, minv, maxv, step, anchor, x, y)
     s:SetValueStep(step)
     s:SetObeyStepOnDrag(true)
     s:SetWidth(300)
-    HookAdaptiveWidth(s, parent, function()
-        local pw = tonumber(parent:GetWidth()) or 620
+    HookAdaptiveWidth(s, parent, function(target, container)
+        local pw = tonumber(container:GetWidth()) or 620
         -- Keep room for numeric editbox + +/- buttons on the right.
         local w = math.floor(pw - 250)
         if w < 180 then w = 180 end
         if w > 420 then w = 420 end
-        s:SetWidth(w)
+        target:SetWidth(w)
     end)
 
     SetWidgetText(s, L(label))
@@ -174,8 +476,6 @@ local function AttachNumericEditBox(slider, opts)
     incBtn:SetSize(btnW, btnH)
     incBtn:SetPoint("LEFT", eb, "RIGHT", 3, 0)
     incBtn:SetText("+")
-
-    local updating = false
 
     local function ClampAndQuantize(v)
         local n = tonumber(v)
@@ -214,10 +514,7 @@ local function AttachNumericEditBox(slider, opts)
     end
 
     local function SyncFromSlider()
-        if updating then return end
-        updating = true
-        eb:SetText(Format(slider:GetValue()))
-        updating = false
+        return SyncNumericSlider(slider)
     end
 
     local function CommitFromInput(raw)
@@ -229,19 +526,7 @@ local function AttachNumericEditBox(slider, opts)
         return true
     end
 
-    slider:HookScript("OnValueChanged", function()
-        SyncFromSlider()
-    end)
-    slider:HookScript("OnShow", function()
-        SyncFromSlider()
-    end)
-    local sliderParent = slider:GetParent()
-    if sliderParent and sliderParent.HookScript and not slider._fguiNumericParentHooked then
-        slider._fguiNumericParentHooked = true
-        sliderParent:HookScript("OnShow", function()
-            SyncFromSlider()
-        end)
-    end
+    RegisterNumericSliderSync(slider, parent, eb, Format)
 
     eb:SetScript("OnEnterPressed", function(self)
         if not CommitFromInput(self:GetText()) then
@@ -288,11 +573,11 @@ local function CreateStatusLine(parent, anchor, x, y)
     fs:SetJustifyH("LEFT")
     fs:SetWordWrap(true)
     fs:SetText("")
-    HookAdaptiveWidth(fs, parent, function()
-        local pw = tonumber(parent:GetWidth()) or 620
+    HookAdaptiveWidth(fs, parent, function(target, container)
+        local pw = tonumber(container:GetWidth()) or 620
         local newWidth = math.floor(pw - 36)
         if newWidth < 180 then newWidth = 180 end
-        fs:SetWidth(newWidth)
+        target:SetWidth(newWidth)
     end)
     return fs
 end
@@ -313,15 +598,15 @@ local function CreateDropdown(parent, label, width, anchor, x, y)
     dd:SetPoint("TOPLEFT", title, "BOTTOMLEFT", -16, -4)
     local preferred = tonumber(width) or 260
     UIDropDownMenu_SetWidth(dd, preferred)
-    HookAdaptiveWidth(dd, parent, function()
-        local pw = tonumber(parent:GetWidth()) or 620
+    HookAdaptiveWidth(dd, parent, function(target, container)
+        local pw = tonumber(container:GetWidth()) or 620
         local maxWidth = math.floor(pw - 120)
         if maxWidth < 140 then maxWidth = 140 end
-        local target = preferred
-        if target > maxWidth then
-            target = maxWidth
+        local targetWidth = preferred
+        if targetWidth > maxWidth then
+            targetWidth = maxWidth
         end
-        UIDropDownMenu_SetWidth(dd, target)
+        UIDropDownMenu_SetWidth(target, targetWidth)
     end)
     return dd
 end
@@ -388,21 +673,11 @@ local function CreateScrollablePanel(name, contentHeight)
     root._scrollContent = content
     root._contentBaseHeight = contentHeight or 1000
 
-    local function AttachChildWheelProxy(frame)
-        if not frame or frame == content or frame == scroll then return end
-        if frame._fguiWheelProxy then return end
-        if not (frame.EnableMouseWheel and frame.HookScript) then return end
-
-        frame._fguiWheelProxy = true
-        frame:EnableMouseWheel(true)
-        frame:HookScript("OnMouseWheel", function(_, delta)
-            ScrollByDelta(scroll, delta)
-        end)
-    end
-
     local function RefreshWheelProxies()
         for _, child in ipairs({ content:GetChildren() }) do
-            AttachChildWheelProxy(child)
+            if child and child ~= content and child ~= scroll then
+                AttachWheelProxy(child, scroll, ScrollByDelta)
+            end
         end
     end
 
@@ -948,6 +1223,8 @@ function Shared.CreateBuilderContext()
 end
 
 Shared.SetWidgetText = SetWidgetText
+Shared.AttachWheelProxy = AttachWheelProxy
+Shared.RegisterNumericSliderSync = RegisterNumericSliderSync
 Shared.HookAdaptiveWidth = HookAdaptiveWidth
 Shared.CreateHeader = CreateHeader
 Shared.CreateSubHeader = CreateSubHeader

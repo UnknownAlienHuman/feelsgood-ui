@@ -48,7 +48,7 @@ Movers._registered = Movers._registered or {}
 Movers._unlocked = Movers._unlocked or false
 Movers._activeKey = Movers._activeKey or nil
 Movers._activeOverlay = Movers._activeOverlay or nil
-Movers._stateListeners = Movers._stateListeners or {}
+Movers._stateListeners = setmetatable({}, { __mode = "k" })
 
 -- Grid state
 Movers._grid = Movers._grid or {
@@ -432,7 +432,7 @@ local function ApplyUnlockedState(owner, state, opts)
     if changed then
         for key, callback in pairs(owner._stateListeners) do
             if type(callback) == "function" then
-                local ok = pcall(callback, owner._unlocked, owner)
+                local ok = pcall(callback, owner._unlocked, owner, key)
                 if not ok then
                     Log:Warn("Movers state listener failed for " .. tostring(key))
                 end
@@ -446,19 +446,25 @@ local function ApplyUnlockedState(owner, state, opts)
 end
 
 function Movers:RegisterStateListener(key, callback)
-    if key == nil or type(callback) ~= "function" then
-        return
+    if key == nil then
+        return false, "Mover state listener key is required"
+    end
+    if type(callback) ~= "function" then
+        return false, "Mover state listener callback is required"
     end
 
     self._stateListeners[key] = callback
+    return true
 end
 
 function Movers:UnregisterStateListener(key)
     if key == nil then
-        return
+        return false
     end
 
+    local existed = self._stateListeners[key] ~= nil
     self._stateListeners[key] = nil
+    return existed
 end
 
 function Movers:PreviewUnlocked(state, opts)

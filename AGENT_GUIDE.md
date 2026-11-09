@@ -19,6 +19,7 @@ The executable entry points are `core/Bootstrap.lua:ns` and `core/Events.lua:OnE
 - Animation/timers: `core/Animate.lua` owns fade groups and keyed timer state through weak-key frame/owner registries; generic helpers never add cache fields to callers.
 - Media: `core/Media.lua` owns borders through a weak-key registry keyed by target frame; consumers use `CreateBorder`, `GetBorder`, and `SetBorderColor` and never stamp addon metadata onto Blizzard/third-party frames.
 - Minimap: `core/MinimapIcon.lua` passes a detached runtime proxy to LibDBIcon, keeps hook records in an addon-owned weak registry, binds active drag state to the exact LibDBIcon button, and commits only the terminal position through Settings/Apply; never pass the live `profile.minimap` table to third-party code.
+- Options: `core/OptionsSharedHelpers.lua` owns adaptive-width, numeric-sync, and wheel-proxy hooks through weak registries; `core/OptionsPanelEditMode.lua` registers mover refresh through the weak listener API. Never publish hook/listener ownership before the native registration call succeeds or stamp `_fgui*` markers on widgets/panels.
 - Options/minimap/commands are adapters over Settings/Apply. User mutations from the General panel and `/fgui debug|perf|aura|minimap` must never write both profile and runtime directly. `core/Commands.lua:Commands:Register` registers `SlashCmdList.FEELSGOODUI`.
 - `/fgui` command groups are defined in `core/Commands.lua`: user (`unlock`, `lock`, `resetpos`, `config`, `export`, `import`, `minimap`, `reset`), transitional (`aura`), and diagnostic (`debug`, `perf`, `errors`, `clearerrors`, `qa`, `report`, `soak`).
 
@@ -49,6 +50,7 @@ The executable entry points are `core/Bootstrap.lua:ns` and `core/Events.lua:OnE
 - Read paths must never create SavedVariables sections: `DB:GetSection` is not used by first-party runtime code, `DB:ReadSection` returns nil for missing/non-table sections, and repair is explicit through `DB:EnsureSection`/Settings/Schema.
 - Settings transaction rollback and apply-key ordering are correctness invariants: profile state, undo history, and runtime state must commit together or restore together. A mover resize that changes both feature geometry and anchor position is one multi-owner transaction, not independent writes.
 - Profile import is not successful until every immediate and combat-deferred apply owner commits. `/reload`, logout, or termination while pending must recover the previous profile before DB initialization and overlay only changes made after the import began.
+- Permanent UI hooks/listeners must be retryable and replacement-safe: publish each edge only after successful registration, keep state in addon-owned registries, and make stale callbacks resolve current ownership instead of trusting object markers.
 - User-facing adapters must not update runtime optimistically after a profile write; the apply owner performs the runtime transition and reports failure back to the journal.
 - `core/Bootstrap.lua` temporarily exposes a debug global; keep it removable through `HideDebugGlobal`.
 
