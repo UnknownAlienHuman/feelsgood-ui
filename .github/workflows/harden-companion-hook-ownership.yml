@@ -81,7 +81,7 @@ jobs:
 
           required_runtime = [
               'Companion callback container creation failed',
-              'Companion callback registration failed',
+              'Companion expand callback registration failed',
               'Companion expand callback failed',
               'local callbackReady, callbackDetail = EnsureExpandChangedCallback(module)',
           ]
