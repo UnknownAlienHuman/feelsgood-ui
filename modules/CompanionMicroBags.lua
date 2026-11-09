@@ -37,19 +37,26 @@ local function CreateMicroMenuMoverSpec()
 end
 
 local function EnsureMicroAnchor(module)
-    if module._microAnchor then return module._microAnchor end
-
-    local frame = CreateFrame("Frame", "FGUI_oUF_MicroMenuHolder", UIParent)
-    frame:SetSize(360, 40)
-    frame:SetPoint("BOTTOM", UIParent, "BOTTOM", 0, 4)
-    frame:Show()
-    module._microAnchor = frame
-
-    if Movers and Movers.Register then
-        Movers:Register(Shared.MICRO_KEY, frame, CreateMicroMenuMoverSpec())
-        Movers:Apply(Shared.MICRO_KEY, frame)
+    local frame = module._microAnchor
+    if not frame then
+        frame = CreateFrame("Frame", "FGUI_oUF_MicroMenuHolder", UIParent)
+        frame:SetSize(360, 40)
+        frame:SetPoint("BOTTOM", UIParent, "BOTTOM", 0, 4)
+        frame:Show()
+        module._microAnchor = frame
     end
 
+    if not (Movers and type(Movers.Register) == "function" and type(Movers.Apply) == "function") then
+        return nil, "Companion micro mover registry unavailable"
+    end
+    local registered, registerDetail = Movers:Register(Shared.MICRO_KEY, frame, CreateMicroMenuMoverSpec())
+    if registered == false then
+        return nil, "Companion micro mover registration failed: " .. tostring(registerDetail)
+    end
+    local applied, applyDetail = Movers:Apply(Shared.MICRO_KEY, frame)
+    if applied == false then
+        return nil, "Companion micro mover apply failed: " .. tostring(applyDetail)
+    end
     return frame
 end
 
@@ -947,8 +954,8 @@ function MicroBags:Apply(module, cp, profile)
         return true
     end
 
-    local anchor = EnsureMicroAnchor(module)
-    if not anchor then return false, "Companion micro-menu anchor unavailable" end
+    local anchor, anchorDetail = EnsureMicroAnchor(module)
+    if not anchor then return false, anchorDetail or "Companion micro-menu anchor unavailable" end
 
     local size = cp.buttonSize or 32
     local spacing = cp.spacing or 0

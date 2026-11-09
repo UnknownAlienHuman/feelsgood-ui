@@ -91,24 +91,28 @@ local function ApplyPetAnchorVisibility(frame)
 end
 
 local function EnsurePetAnchor(module)
-    if module._petAnchor then
-        ApplyPetAnchorVisibility(module._petAnchor)
-        return module._petAnchor
+    local frame = module._petAnchor
+    if not frame then
+        frame = CreateFrame("Frame", "FGUI_oUF_PetBarHolder", UIParent, "SecureHandlerStateTemplate")
+        frame:SetSize(320, 32)
+        frame:SetPoint("CENTER", UIParent, "CENTER", 0, -160)
+        frame:Show()
+        module._petAnchor = frame
     end
 
-    local frame = CreateFrame("Frame", "FGUI_oUF_PetBarHolder", UIParent, "SecureHandlerStateTemplate")
-    frame:SetSize(320, 32)
-    frame:SetPoint("CENTER", UIParent, "CENTER", 0, -160)
-    frame:Show()
-    module._petAnchor = frame
-
-    if Movers and Movers.Register then
-        Movers:Register(Shared.PET_KEY, frame, CreatePetBarMoverSpec())
-        Movers:Apply(Shared.PET_KEY, frame)
+    if not (Movers and type(Movers.Register) == "function" and type(Movers.Apply) == "function") then
+        return nil, "Companion pet mover registry unavailable"
+    end
+    local registered, registerDetail = Movers:Register(Shared.PET_KEY, frame, CreatePetBarMoverSpec())
+    if registered == false then
+        return nil, "Companion pet mover registration failed: " .. tostring(registerDetail)
+    end
+    local applied, applyDetail = Movers:Apply(Shared.PET_KEY, frame)
+    if applied == false then
+        return nil, "Companion pet mover apply failed: " .. tostring(applyDetail)
     end
 
     ApplyPetAnchorVisibility(frame)
-
     return frame
 end
 
@@ -237,9 +241,9 @@ PreviewPetLayout = function(module, size, spacing)
         return false, "Companion preview blocked in combat"
     end
 
-    local holder = EnsurePetAnchor(module)
+    local holder, holderDetail = EnsurePetAnchor(module)
     if not holder then
-        return false, "Pet bar holder unavailable"
+        return false, holderDetail or "Pet bar holder unavailable"
     end
 
     local pending = {}
@@ -321,8 +325,8 @@ function PetBar:Apply(module, cp, profile)
         return false, "Companion pet-bar apply deferred in combat"
     end
 
-    local holder = EnsurePetAnchor(module)
-    if not holder then return false, "Companion pet-bar holder unavailable" end
+    local holder, holderDetail = EnsurePetAnchor(module)
+    if not holder then return false, holderDetail or "Companion pet-bar holder unavailable" end
 
     local nativeOK, nativeDetail = PetState:SuppressNativeBar(module, _G.PetActionBar)
     if nativeOK ~= true then

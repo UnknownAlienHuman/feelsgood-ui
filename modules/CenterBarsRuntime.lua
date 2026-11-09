@@ -251,8 +251,20 @@ function Runtime:Init(owner)
     power:ClearAllPoints()
     power:SetPoint("TOP", resource, "BOTTOM", 0, -gap)
 
-    Movers:Register("center", f, createCenterMoverSpec("Center"))
-    Movers:Apply("center", f)
+    if not (Movers and type(Movers.Register) == "function" and type(Movers.Apply) == "function") then
+        f:Hide()
+        return false, "CenterBars mover registry unavailable"
+    end
+    local registered, registerDetail = Movers:Register("center", f, createCenterMoverSpec("Center"))
+    if registered == false then
+        f:Hide()
+        return false, "CenterBars mover registration failed: " .. tostring(registerDetail)
+    end
+    local applied, applyDetail = Movers:Apply("center", f)
+    if applied == false then
+        f:Hide()
+        return false, "CenterBars mover apply failed: " .. tostring(applyDetail)
+    end
 
     owner._inited = true
 

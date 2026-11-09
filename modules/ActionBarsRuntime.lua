@@ -405,7 +405,10 @@ function Runtime.PreviewMoverLayout(module, size, spacing)
     end
 
     local ab = GetActionBarsCfg()
-    module:EnsureCreated()
+    local created, createDetail = module:EnsureCreated()
+    if created == false then
+        return false, tostring(createDetail or "ActionBars holder initialization failed")
+    end
 
     local barsCfg = (type(ab.bars) == "table") and ab.bars or {}
     local showHotkeys = (ab.showHotkeys == true)
@@ -441,7 +444,10 @@ function Runtime.ApplyNow(module)
     end
 
     local ab = GetActionBarsCfg()
-    module:EnsureCreated()
+    local created, createDetail = module:EnsureCreated()
+    if created == false then
+        return false, tostring(createDetail or "ActionBars holder initialization failed")
+    end
 
     local stateHooksOK, stateHooksDetail = module:EnsureStateHooks(
         module._actionChangedCallbackRegistered == true

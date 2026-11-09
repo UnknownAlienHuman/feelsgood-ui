@@ -14,7 +14,8 @@
 | `core/ProfileImport.lua`, `core/ProfileTransfer.lua` | Bounded decode/export UI, detached normalization, profile-wide atomic commit/rollback, and durable recovery for interrupted imports. |
 | `core/MinimapIcon.lua` | LibDBIcon runtime proxy, weak-key button-hook ownership, exact active-drag owner, terminal position transaction, and rollback reconciliation. |
 | `core/OptionsSharedHelpers.lua`, `core/OptionsPanelEditMode.lua` | Weak-key adaptive/numeric/wheel hook ownership, retryable mover-panel listener registration, and marker-free settings UI wiring. |
-| `core/Options*.lua`, `core/Movers*.lua`, `core/Commands.lua` | Settings pages, frame editing/movement UI, and command adapters over Settings/Apply. |
+| `core/Movers.lua`, `core/MoversEditor.lua`, `core/MoversInspector.lua`, `core/MoversSnapGrid.lua` | Result-bearing replacement-safe mover registry, retired-overlay cleanup, position apply, editor overlays, inspector, snapping/grid and lock-state presentation. |
+| `core/Options*.lua`, `core/Commands.lua` | Settings pages and command adapters over Settings/Apply. |
 | `core/FeatureRegistry.lua` | Feature definitions and apply order. |
 | `modules/UnitFramesPolicy.lua` | Read-only UnitFrames configuration/cache policy, immutable fallbacks, and transactional mover write builders. |
 | `modules/UnitFramesRuntime.lua`, `modules/UnitFramesRender.lua`, `modules/UnitFramesTarget.lua`, `modules/UnitFramesText.lua`, `modules/UnitFrames.lua` | Unit-frame lifecycle, rendering, target/aura observers, text safety, weak-key oUF runtime ownership, and result-bearing unit-watch transitions without persisted configuration repair. |

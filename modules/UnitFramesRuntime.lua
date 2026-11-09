@@ -287,18 +287,39 @@ function Runtime:Init(owner)
     pet, spawnError = SpawnOwned("pet", "pet", "FGUI_Pet")
     if not pet then return false, spawnError end
 
-    Movers:Register("player", player, createUnitMoverSpec("player", "Player"))
-    Movers:Register("target", target, createUnitMoverSpec("target", "Target"))
-    Movers:Register("focus", focus, createUnitMoverSpec("focus", "Focus"))
-    Movers:Register("targettarget", targettarget, createUnitMoverSpec("targettarget", "TargetTarget"))
-    Movers:Register("pet", pet, createUnitMoverSpec("pet", "Pet"))
+    if not (Movers and type(Movers.Register) == "function" and type(Movers.Apply) == "function") then
+        return false, "UnitFrames mover registry unavailable"
+    end
 
-    Movers:Apply("player", player)
-    Movers:Apply("target", target)
-    Movers:Apply("focus", focus)
-    Movers:Apply("targettarget", targettarget)
-    Movers:Apply("pet", pet)
-    Movers:ApplyUnlockFromDB()
+    local registrations = {
+        { key = "player", frame = player, label = "Player" },
+        { key = "target", frame = target, label = "Target" },
+        { key = "focus", frame = focus, label = "Focus" },
+        { key = "targettarget", frame = targettarget, label = "TargetTarget" },
+        { key = "pet", frame = pet, label = "Pet" },
+    }
+    for i = 1, #registrations do
+        local record = registrations[i]
+        local registered, detail = Movers:Register(
+            record.key,
+            record.frame,
+            createUnitMoverSpec(record.key, record.label)
+        )
+        if registered == false then
+            return false, "UnitFrames mover " .. record.key .. ": " .. tostring(detail)
+        end
+        local applied, applyDetail = Movers:Apply(record.key, record.frame)
+        if applied == false then
+            return false, "UnitFrames mover " .. record.key .. ": " .. tostring(applyDetail)
+        end
+    end
+
+    if type(Movers.ApplyUnlockFromDB) == "function" then
+        local unlocked, unlockDetail = Movers:ApplyUnlockFromDB()
+        if unlocked == false then
+            return false, "UnitFrames mover unlock sync failed: " .. tostring(unlockDetail)
+        end
+    end
 
     owner._inited = true
 

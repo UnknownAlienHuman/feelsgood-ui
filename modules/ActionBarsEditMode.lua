@@ -114,14 +114,18 @@ end
 
 function EditMode.RegisterHolder(holder, id)
     if not holder or type(id) ~= "number" then
-        return
+        return false, "ActionBar mover holder/id unavailable"
     end
     if not Movers or type(Movers.Register) ~= "function" or type(Movers.Apply) ~= "function" then
-        return
+        return false, "Mover registry unavailable for ActionBar " .. tostring(id)
     end
 
-    Movers:Register("actionbar" .. id, holder, CreateActionBarMoverSpec(id))
-    Movers:Apply("actionbar" .. id, holder)
+    local key = "actionbar" .. id
+    local registered, registerDetail = Movers:Register(key, holder, CreateActionBarMoverSpec(id))
+    if registered == false then return false, registerDetail end
+    local applied, applyDetail = Movers:Apply(key, holder)
+    if applied == false then return false, applyDetail end
+    return true
 end
 
 return EditMode

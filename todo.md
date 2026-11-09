@@ -4,7 +4,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 
 ## Retail 12.1.5 implementation status
 
-- [x] Target Interface `120105` and release `0.0.67`.
+- [x] Target Interface `120105` and release `0.0.68`.
 - [x] Gate Secret/Restricted Values before Lua inspection, conversion, comparison, or formatting.
 - [x] Integrate restricted Unit Frame and Center Bar handling into the canonical render/target owners; remove late method overrides and duplicate producer calls.
 - [x] Keep opaque power/text on exact native sinks where available; otherwise render an explicit unavailable state.
@@ -35,6 +35,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 - [x] Move Options adaptive-width, numeric-sync, wheel-proxy, and Edit Mode mover-listener ownership into weak registries; publish each hook edge only after successful registration and retry partial failures without widget/panel markers.
 - [x] Make ActionBars holder/button auto-hide and state-layer hooks result-bearing: weak registries own state, callbacks resolve current owners, partial failures retry only missing edges, and visual/apply callers propagate failure.
 - [x] Make ActionBars permanent state, EndCaps, SettingsPanel and action-change hooks result-bearing: weak target/method registries prevent duplicates, partial hooks stay inert until full init publishes active owners, init/callback flags publish after success, callback generations make stale handles inert before cleanup, owner replacement is dynamic, and detach releases owners/handles.
+- [x] Make mover registration/apply result-bearing and replacement-safe: duplicate same-frame registration reuses state, frame replacement atomically retires old overlay scripts, invalid positions fail explicitly, and all feature families block initialized state until mover ownership succeeds.
 - [x] Move UnitFrames target observers, aura roles, header-hook state, low-health cache and unit-watch ownership off oUF frames/elements into weak registries; remove target-aura runtime persistence writes and propagate native watch failures.
 - [x] Make ExperienceBar native takeover a verified property journal: refuse unreadable channels, read back every write, retain unresolved restore state for retry, reopen hooks on manager replacement, preserve newer conflicts, and propagate exact hook/suppress/restore failures.
 
@@ -58,6 +59,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 - [ ] Repeatedly skin and restore Blizzard pet/micro/bag buttons; border frames are reused through `Media` without any `__fguiBorder*` fields on the target buttons, and transparent release is reversed by the next theme/style apply.
 - [ ] Force HookScript, hooksecurefunc, EventRegistry registration, missing pet buttons, and MicroBags layer failures; Companion publishes no false hook flags, retries only missing edges, replacement makes stale callbacks inert, partial layers restore, and the exact failure reaches Lifecycle/Apply.
 - [ ] Give each PetActionButton and PetActionBar distinctive parent/points/size/hit-rect/visibility/alpha/texture/mask/name/cooldown/hotkey state, apply twice, replace one button, make one conflicting external change, then detach; exact still-owned state restores without guessed defaults or overwriting the conflict.
+- [ ] Force mover registration, overlay creation, position apply and handle-refresh failure across ActionBars, UnitFrames, CenterBars, Companion and ExperienceBar; feature init stays pending, retry reuses partial frames, same-frame registration stays single, replacement retires every old overlay script/handle, and only the current frame receives later movement.
 - [ ] Force mover position/scale/size apply failure; profile, exact undo artifact, and visible frame geometry return to the persisted state.
 - [ ] Lock Edit Mode while resize preview is active; preview state is discarded and the persisted geometry is restored without a stale commit.
 - [ ] Start with UnitFrames and CenterBars disabled, log in, then enable them without `/reload`; frames initialize once, observers/events attach once, and live updates begin immediately.

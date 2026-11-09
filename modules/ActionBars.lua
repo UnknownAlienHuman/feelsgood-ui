@@ -11,29 +11,69 @@ local State = ns.ActionBarsState
 local ACTION_BAR_COUNT = 5
 
 local function CreateHolder(id)
-    local holder = CreateFrame("Frame", "FGUI_ActionBarHolder" .. id, UIParent, "SecureHandlerStateTemplate")
+    local ok, holder = pcall(
+        CreateFrame,
+        "Frame",
+        "FGUI_ActionBarHolder" .. id,
+        UIParent,
+        "SecureHandlerStateTemplate"
+    )
+    if not ok or not holder then
+        return nil, ok and "ActionBar holder creation returned nil" or tostring(holder)
+    end
+
     holder:SetFrameStrata("LOW")
     holder:SetFrameLevel(10)
     holder.id = id
     holder.buttons = {}
     holder._layoutDirty = false
-
-    if EditMode and EditMode.RegisterHolder then
-        EditMode.RegisterHolder(holder, id)
-    end
-
-    RegisterStateDriver(holder, "visibility", "[petbattle][overridebar][vehicleui][possessbar,@vehicle,exists] hide; show")
     return holder
 end
 
-function ActionBars:EnsureCreated()
-    if self._created then
-        return
+local function EnsureHolderReady(holder, id)
+    if not holder then return false, "ActionBar holder unavailable" end
+
+    if holder._visibilityDriverRegistered ~= true then
+        if type(_G.RegisterStateDriver) ~= "function" then
+            return false, "RegisterStateDriver unavailable"
+        end
+        local ok, detail = pcall(
+            _G.RegisterStateDriver,
+            holder,
+            "visibility",
+            "[petbattle][overridebar][vehicleui][possessbar,@vehicle,exists] hide; show"
+        )
+        if not ok then
+            return false, "ActionBar visibility driver failed: " .. tostring(detail)
+        end
+        holder._visibilityDriverRegistered = true
     end
 
-    self.bars = {}
+    if not (EditMode and type(EditMode.RegisterHolder) == "function") then
+        return false, "ActionBars Edit Mode mover owner unavailable"
+    end
+    return EditMode.RegisterHolder(holder, id)
+end
+
+function ActionBars:EnsureCreated()
+    if self._created then return true end
+
+    self.bars = self.bars or {}
     for id = 1, ACTION_BAR_COUNT do
-        self.bars[id] = CreateHolder(id)
+        local holder = self.bars[id]
+        if not holder then
+            local detail
+            holder, detail = CreateHolder(id)
+            if not holder then
+                return false, "ActionBar " .. tostring(id) .. ": " .. tostring(detail)
+            end
+            self.bars[id] = holder
+        end
+
+        local ready, detail = EnsureHolderReady(holder, id)
+        if ready == false then
+            return false, "ActionBar " .. tostring(id) .. ": " .. tostring(detail)
+        end
     end
 
     self.bar1 = self.bars[1]
@@ -43,6 +83,7 @@ function ActionBars:EnsureCreated()
     self.bar5 = self.bars[5]
     self.petBar = nil
     self._created = true
+    return true
 end
 
 function ActionBars:_ForEachHolder(fn)

@@ -325,6 +325,23 @@ try {
 
     assertSourceIncludes('core/FeatureRegistry.lua', 'movers = {');
     assertSourceIncludes('core/PanelTransactions.lua', 'function Tx:RollbackAfter(checkpoint, keys)');
+    assertSourceIncludes('core/Movers.lua', 'local function RetireMoverEntry(owner, entry)');
+    assertSourceIncludes('core/Movers.lua', 'return true, existing and "replaced" or "registered"');
+    assertSourceIncludes('core/Movers.lua', 'stored mover position unavailable');
+    assertSourceIncludes('core/Movers.lua', 'if firstDetail then return false, firstDetail end');
+    assertSourceIncludes('modules/ActionBarsEditMode.lua', 'local registered, registerDetail = Movers:Register');
+    assertSourceIncludes('modules/ActionBars.lua', 'local ready, detail = EnsureHolderReady(holder, id)');
+    assertSourceIncludes('modules/UnitFramesRuntime.lua', 'UnitFrames mover unlock sync failed');
+    assertSourceIncludes('modules/CenterBarsRuntime.lua', 'CenterBars mover registration failed');
+    assertSourceIncludes('modules/ExperienceBar.lua', 'ExperienceBar mover registration failed');
+    assertSourceIncludes('modules/CompanionPetBar.lua', 'Companion pet mover registration failed');
+    assertSourceIncludes('modules/CompanionMicroBags.lua', 'Companion micro mover registration failed');
+    assertSourceExcludes('modules/UnitFramesRuntime.lua', /^\s*Movers:Register\(/m, 'unchecked UnitFrames mover registration');
+    assertSourceExcludes('modules/CenterBarsRuntime.lua', /^\s*Movers:Register\(/m, 'unchecked CenterBars mover registration');
+    assertSourceExcludes('modules/ExperienceBar.lua', /^\s*Movers:Register\(/m, 'unchecked ExperienceBar mover registration');
+    assertSourceExcludes('modules/CompanionPetBar.lua', /^\s*Movers:Register\(/m, 'unchecked Companion pet mover registration');
+    assertSourceExcludes('modules/CompanionMicroBags.lua', /^\s*Movers:Register\(/m, 'unchecked Companion micro mover registration');
+
     assertSourceIncludes('core/MoversTransactions.lua', 'function Transactions:CommitWrites');
     assertSourceIncludes('core/MoversTransactions.lua', 'CaptureWriteSnapshots');
     assertSourceIncludes('core/MoversTransactions.lua', 'RestorePreview(spec.applyKeys)');

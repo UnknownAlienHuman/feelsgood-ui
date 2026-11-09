@@ -33,6 +33,7 @@ Execution rule: every run records the exact client build, addon revision, result
 | 6 | Export/import a valid profile | Round trip preserves supported settings and positions |  |  |
 | 7 | Import malformed, oversized, or wrong-schema data | Import fails cleanly without modifying the active profile |  |  |
 | 8 | Unlock/lock movers; drag near every screen edge | Inspector and frames remain clamped; positions persist after reload |  |  |
+| 8a | Re-register each mover key with same and replacement frames; inject overlay/position failure and retry | Same frame reuses one overlay; replacement retires old scripts/handle; failed replacement preserves prior owner; feature init publishes only after register+apply success |  |  |
 | 9 | Login with UnitFrames/CenterBars disabled, then enable; repeat disable/re-enable | Frames initialize once; observers/events attach once; live updates start without reload or stale owner state |  |  |
 | 10 | Player health in ordinary world context | Value, percent, low-health glow, and color update correctly |  |  |
 | 11 | Target/focus/targettarget ordinary values | Name, level, class, classification, reaction color, and target-of-target update |  |  |
