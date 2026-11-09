@@ -6,6 +6,7 @@ on:
       - codex/unitframes-runtime-registries
     paths:
       - '.github/workflows/fix-unitframes-reconcile.yml'
+      - '.codex/test_unitframes_reconcile.lua'
 
 permissions:
   contents: write
