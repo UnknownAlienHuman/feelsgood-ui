@@ -26,7 +26,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat .codex/parts/experiencebar.transform.part*.b64 | base64 --decode | gzip --decompress > /tmp/harden_experiencebar_native_journal.py
+          cat <<'SUMS' | sha256sum --check -
+          02056dd877ee0963380a2ebca5740d9c8ff542ffd56c959c60c23e4d9396f840  .codex/parts/experiencebar.transform.part00.b64
+          c431b5a5364b016ab5a525967d11f166e1a5ae86f75615cf6c0e6169fba7a4e5  .codex/parts/experiencebar.transform.part01.b64
+          dd9efaf5f1c4d5d614c013ebaae7519ee2ddc3313c9848290b5c95f9b0f98d84  .codex/parts/experiencebar.transform.part02.b64
+          0efaaf6cd96dd595bd681ab85a6d19b3159c3e23342dd022353028d25ce317f3  .codex/parts/experiencebar.transform.part03.b64
+          80fdd8b6f482ff75a2fb3ad7a5bb88037980bc115578fe669b356d687048f434  .codex/parts/experiencebar.transform.part04.b64
+          SUMS
+          cat .codex/parts/experiencebar.transform.part*.b64 > /tmp/experiencebar.transform.gz.b64
+          echo "d1384663d49cd59ab506c95153dfb4815264242cf3b4222c6fc6029c285467e4  /tmp/experiencebar.transform.gz.b64" | sha256sum --check -
+          base64 --decode /tmp/experiencebar.transform.gz.b64 | gzip --decompress > /tmp/harden_experiencebar_native_journal.py
           base64 --decode .codex/experiencebar.harness.lua.gz.b64 | gzip --decompress > /tmp/test_experiencebar_native_journal.lua
           echo "d776c7a9ed2caf33c72d7a8049c17ba86b81de078b8d53109791652a352b5553  /tmp/harden_experiencebar_native_journal.py" | sha256sum --check -
           echo "9f04eb4351dd4fa6bcb34bca10f3a6e65488ef01780c8d3e26b752c71f8e1cc9  /tmp/test_experiencebar_native_journal.lua" | sha256sum --check -
