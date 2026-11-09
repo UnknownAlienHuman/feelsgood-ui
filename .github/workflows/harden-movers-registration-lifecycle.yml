@@ -1,0 +1,121 @@
+name: Harden mover registration lifecycle
+
+on:
+  push:
+    branches:
+      - codex/movers-registration-lifecycle
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Apply mover lifecycle transform
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .codex/harden_movers_registration_lifecycle.py
+          git diff --check
+
+      - name: Audit result propagation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          movers = Path('core/Movers.lua').read_text()
+          edit = Path('modules/ActionBarsEditMode.lua').read_text()
+          actionbars = Path('modules/ActionBars.lua').read_text()
+          runtime = Path('modules/ActionBarsRuntime.lua').read_text()
+          unitframes = Path('modules/UnitFramesRuntime.lua').read_text()
+          center = Path('modules/CenterBarsRuntime.lua').read_text()
+          xp = Path('modules/ExperienceBar.lua').read_text()
+          pet = Path('modules/CompanionPetBar.lua').read_text()
+          micro = Path('modules/CompanionMicroBags.lua').read_text()
+          check = Path('check_lua.js').read_text()
+
+          required = {
+              'retire helper': 'local function RetireMoverEntry(owner, entry)',
+              'replacement result': 'return true, existing and "replaced" or "registered"',
+              'apply error': 'stored mover position unavailable',
+              'ActionBars mover result': 'local registered, registerDetail = Movers:Register',
+              'ActionBars holder retry': 'local ready, detail = EnsureHolderReady(holder, id)',
+              'ActionBars runtime create result': 'local created, createDetail = module:EnsureCreated()',
+              'UnitFrames result': 'UnitFrames mover unlock sync failed',
+              'CenterBars result': 'CenterBars mover registration failed',
+              'Experience result': 'ExperienceBar mover registration failed',
+              'Pet result': 'Companion pet mover registration failed',
+              'Micro result': 'Companion micro mover registration failed',
+          }
+          haystacks = {
+              'retire helper': movers,
+              'replacement result': movers,
+              'apply error': movers,
+              'ActionBars mover result': edit,
+              'ActionBars holder retry': actionbars,
+              'ActionBars runtime create result': runtime,
+              'UnitFrames result': unitframes,
+              'CenterBars result': center,
+              'Experience result': xp,
+              'Pet result': pet,
+              'Micro result': micro,
+          }
+          for label, needle in required.items():
+              assert needle in haystacks[label], f'missing {label}: {needle}'
+
+          for filename, source in {
+              'UnitFramesRuntime': unitframes,
+              'CenterBarsRuntime': center,
+              'ExperienceBar': xp,
+              'CompanionPetBar': pet,
+              'CompanionMicroBags': micro,
+          }.items():
+              assert not re.search(r'^\s*Movers:Register\(', source, re.M), f'unchecked Movers:Register in {filename}'
+              assert not re.search(r'^\s*Movers:Apply\(', source, re.M), f'unchecked Movers:Apply in {filename}'
+
+          assert 'Mover registration lifecycle static contracts' not in check  # labels stay implementation-internal
+          assert 'local function RetireMoverEntry(owner, entry)' in check
+          print('Mover lifecycle ownership audit passed.')
+          PY
+
+      - name: Install Lua 5.1
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v lua5.1 >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y lua5.1
+          fi
+
+      - name: Run mover registry harness
+        run: lua5.1 .codex/test_movers_registration_lifecycle.lua
+
+      - name: Validate addon
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm test
+
+      - name: Commit validated product diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .codex
+          rm -f .github/workflows/harden-movers-registration-lifecycle.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Make mover registration replacement-safe" -m "Return explicit registration/apply results, atomically replace frame owners, retire old overlays and scripts, preserve partial feature frames for retry, and block feature initialization until mover ownership succeeds. Release FeelsGoodUI 0.0.68."
+          git push origin HEAD:codex/movers-registration-lifecycle
