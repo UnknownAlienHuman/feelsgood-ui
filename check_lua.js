@@ -177,6 +177,13 @@ try {
     assertSourceIncludes('modules/ActionBarsState.lua', 'function State.SetStateHookOwner(module)');
     assertSourceIncludes('modules/ActionBarsBlizzardShell.lua', 'function Shell.SetHookOwner(module)');
     assertSourceIncludes('modules/ActionBarsRuntime.lua', 'Runtime._callbackOwner = nil');
+    assertSourceIncludes('modules/ActionBarsRuntime.lua', 'Runtime._callbackRecord = nil');
+    assertSourceIncludes('modules/ActionBarsRuntime.lua', 'local function DispatchActionChanged(record, _, button)');
+    assertSourceIncludes('modules/ActionBarsRuntime.lua', 'record.active == true and Runtime._callbackRecord == record');
+    assertSourceIncludes('modules/ActionBarsRuntime.lua', 'callbackRecord.active = false');
+    assertSourceIncludes('modules/ActionBarsRuntime.lua', 'module._callbackHandles = nil');
+    assertSourceExcludes('modules/ActionBarsRuntime.lua', /RegisterCallback[\s\S]{0,500}OnActionChanged,\s*module/, 'unguarded ActionBars callback registration');
+
     assertSourceIncludes('modules/ActionBarsRuntime.lua', 'local activeModule = Runtime._callbackOwner');
     assertSourceIncludes('modules/ActionBarsRuntime.lua', 'if not IsReady(activeModule) or IsDetached(activeModule) then return end');
     assertSourceIncludes('modules/ActionBarsRuntime.lua', 'local ownerOK, ownerDetail = State.SetStateHookOwner(module)');

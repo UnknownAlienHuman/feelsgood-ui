@@ -4,6 +4,8 @@ local _, ns = ...
 local Runtime = {}
 ns.ActionBarsRuntime = Runtime
 Runtime._callbackOwner = nil
+Runtime._callbackRecord = nil
+Runtime._nextCallbackID = 0
 
 local Log = ns.Log
 local DB = ns.DB
@@ -328,43 +330,70 @@ local function OnActionChanged(_, button)
     if State and State.UpdateButtonEmpty then State.UpdateButtonEmpty(button) end
 end
 
-local function EnsureActionChangedCallback(module)
-    if module._actionChangedCallbackRegistered == true then
-        return true, nil, true
+local function DispatchActionChanged(record, _, button)
+    if not (record and record.active == true and Runtime._callbackRecord == record) then
+        return
     end
+    OnActionChanged(nil, button)
+end
+
+local function EnsureActionChangedCallback(module)
+    local existingRecord = module._actionChangedCallbackRecord
+    if module._actionChangedCallbackRegistered == true
+        and type(existingRecord) == "table"
+        and existingRecord.active == true
+        and module._callbackHandles then
+        return true, nil, true, existingRecord
+    end
+
+    module._actionChangedCallbackRegistered = nil
+    module._actionChangedCallbackRecord = nil
+    module._callbackHandles = nil
+
     if not _G.EventRegistry then
-        return true, nil, false
+        return true, nil, false, nil
     end
     if not (EventUtil and type(EventUtil.CreateCallbackHandleContainer) == "function") then
-        return true, nil, false
+        return true, nil, false, nil
     end
 
-    if not module._callbackHandles then
-        local ok, container = pcall(EventUtil.CreateCallbackHandleContainer)
-        if not ok or not container then
-            return false, ok and "Callback handle container unavailable" or tostring(container), false
-        end
-        module._callbackHandles = container
+    local createOK, container = pcall(EventUtil.CreateCallbackHandleContainer)
+    if not createOK or not container then
+        return false, createOK and "Callback handle container unavailable" or tostring(container), false, nil
+    end
+    if type(container.RegisterCallback) ~= "function" then
+        return false, "Callback handle container lacks RegisterCallback", false, nil
     end
 
-    if type(module._callbackHandles.RegisterCallback) ~= "function" then
-        return false, "Callback handle container lacks RegisterCallback", false
+    Runtime._nextCallbackID = Runtime._nextCallbackID + 1
+    local record = {
+        id = Runtime._nextCallbackID,
+        active = true,
+    }
+    local callback = function(...)
+        DispatchActionChanged(record, ...)
     end
 
     local registeredOK, registeredDetail = pcall(
-        module._callbackHandles.RegisterCallback,
-        module._callbackHandles,
+        container.RegisterCallback,
+        container,
         _G.EventRegistry,
         "ActionButton.OnActionChanged",
-        OnActionChanged,
+        callback,
         module
     )
     if not registeredOK then
-        return false, tostring(registeredDetail), false
+        record.active = false
+        if type(container.Unregister) == "function" then
+            pcall(container.Unregister, container)
+        end
+        return false, tostring(registeredDetail), false, nil
     end
 
+    module._callbackHandles = container
+    module._actionChangedCallbackRecord = record
     module._actionChangedCallbackRegistered = true
-    return true, nil, true
+    return true, nil, true, record
 end
 
 function Runtime.PreviewMoverLayout(module, size, spacing)
@@ -538,7 +567,7 @@ function Runtime.Init(module)
         return false, "ActionBars init owner unavailable"
     end
 
-    local callbackOK, callbackDetail, callbackRegistered = EnsureActionChangedCallback(module)
+    local callbackOK, callbackDetail, callbackRegistered, callbackRecord = EnsureActionChangedCallback(module)
     if callbackOK == false then
         return false, "ActionBars action-change callback registration failed: " .. tostring(callbackDetail)
     end
@@ -573,6 +602,7 @@ function Runtime.Init(module)
     end
 
     Runtime._callbackOwner = callbackRegistered == true and module or nil
+    Runtime._callbackRecord = callbackRegistered == true and callbackRecord or nil
 
     if module._initDone then
         return true
@@ -671,6 +701,17 @@ function Runtime.Detach(module)
 
     module._detached = true
 
+    local callbackRecord = module._actionChangedCallbackRecord
+    if type(callbackRecord) == "table" then
+        callbackRecord.active = false
+    end
+    if Runtime._callbackRecord == callbackRecord then
+        Runtime._callbackRecord = nil
+    end
+    if Runtime._callbackOwner == module then
+        Runtime._callbackOwner = nil
+    end
+
     if InCombat() then
         QueueDetachedRestore(module)
     else
@@ -691,16 +732,16 @@ function Runtime.Detach(module)
         end
     end
 
-    if module._callbackHandles and type(module._callbackHandles.Unregister) == "function" then
-        local ok, detail = pcall(module._callbackHandles.Unregister, module._callbackHandles)
+    local callbackHandles = module._callbackHandles
+    module._callbackHandles = nil
+    module._actionChangedCallbackRecord = nil
+    module._actionChangedCallbackRegistered = nil
+    if callbackHandles and type(callbackHandles.Unregister) == "function" then
+        local ok, detail = pcall(callbackHandles.Unregister, callbackHandles)
         if not ok then
             cleanupOK = false
             cleanupDetail = cleanupDetail or tostring(detail)
         end
-    end
-    module._actionChangedCallbackRegistered = nil
-    if Runtime._callbackOwner == module then
-        Runtime._callbackOwner = nil
     end
 
     if State and type(State.ReleaseStateHookOwner) == "function" then
