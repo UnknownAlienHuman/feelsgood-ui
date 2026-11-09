@@ -24,6 +24,7 @@ jobs:
         run: |
           set -euo pipefail
           python .codex/harden_actionbars_global_hooks.py
+          python .codex/fix_actionbars_global_hook_fixtures.py
           git diff --check
 
       - name: Audit global hook lifecycle
@@ -64,8 +65,7 @@ jobs:
           for label, needle in required.items():
               assert needle in haystacks[label], f'missing {label}: {needle}'
 
-          for needle in ('_stateHooksAttached',):
-              assert needle not in state, f'legacy state summary remains: {needle}'
+          assert '_stateHooksAttached' not in state
           for needle in ('_endCapsHooked', '_settingsPanelHooked', '_settingsTransitionHooked', '_settingsShellRepair'):
               assert needle not in shell, f'legacy shell hook metadata remains: {needle}'
 
