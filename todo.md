@@ -4,7 +4,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 
 ## Retail 12.1.5 implementation status
 
-- [x] Target Interface `120105` and release `0.0.61`.
+- [x] Target Interface `120105` and release `0.0.62`.
 - [x] Gate Secret/Restricted Values before Lua inspection, conversion, comparison, or formatting.
 - [x] Integrate restricted Unit Frame and Center Bar handling into the canonical render/target owners; remove late method overrides and duplicate producer calls.
 - [x] Keep opaque power/text on exact native sinks where available; otherwise render an explicit unavailable state.
@@ -31,6 +31,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 - [x] Journal PetActionButton takeover in `CompanionPetState`: separate structural layout from dynamic visibility ownership, reopen snapshots on component replacement, journal mover preview, refuse unreadable mutable components, and restore exact still-owned texture/text/cooldown/native-bar-alpha state.
 - [x] Move ActionBars runtime metadata off Blizzard ActionButton/FontString/Cooldown objects into weak-key button/region registries; hooks resolve current owner/layers through the registry and no callback/style cache is stored on foreign frames.
 - [x] Remove generic caller-object metadata: Animate fade/timer state and Minimap LibDBIcon hook state live in weak registries, active drag is button-specific, and the unused arbitrary cooldown-frame cache helper is deleted.
+- [x] Move UnitFrames target observers, aura roles, header-hook state, low-health cache and unit-watch ownership off oUF frames/elements into weak registries; remove target-aura runtime persistence writes and propagate native watch failures.
 
 ## Required in-game validation
 
@@ -58,7 +59,8 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 - [ ] Simulate a feature attach/apply failure; the module remains disabled, any new attachment is cleaned up, later feature families still enable, and the exact failure is logged.
 - [ ] Player/target/focus/targettarget frames handle ordinary and restricted health/name/classification values without formatting errors or opaque readback.
 - [ ] Remove a UnitFrames section/size/scale field in a test profile after DB initialization, then create/apply frames; runtime must use defaults without recreating or mutating the missing persisted field, while the next explicit DB/schema normalization repairs it.
-- [ ] Target aura filtering handles ordinary and inaccessible aura-source payloads without indexing denied tables or fields.
+- [ ] Target aura filtering handles ordinary and inaccessible aura-source payloads without indexing denied tables or fields; aura containers and oUF frames receive no `_fgui*` metadata, repeated attach installs no duplicate hooks/observers, and detach makes permanent header hooks inert.
+- [ ] Force `RegisterUnitWatch` and `UnregisterUnitWatch` failures for focus/targettarget/pet; no false registry state is published, Apply/Lifecycle receives the exact failure, successful retry is idempotent, and detach clears every successfully owned watch.
 - [ ] Center bars handle ordinary and restricted power/rune values without duplicate producer calls, error loops, retained opaque samples, or stale text.
 - [ ] Across DK/Rogue/Druid/Paladin/Monk/Warlock/Mage/Evoker, give native class-resource frames distinctive alpha/mouse/visibility states, trigger OnShow, replace a named frame, toggle suppression in combat, and verify zero addon Hide/Show/Setup calls, exact owned-property restore, and preservation of newer conflicting changes.
 - [ ] Companion micro-menu/bag hooks coalesce repeated show/hide/layout requests instead of bypassing the queue; detach cancels both apply and micro-layout generations.

@@ -148,6 +148,17 @@ try {
     assertSourceExcludes('core/MinimapIcon.lua', /_fguiTransactionalDragHooked/, 'LibDBIcon button metadata');
     assertSourceExcludes('core/MinimapIcon.lua', /local dragging = false/, 'global minimap drag boolean');
 
+    assertSourceIncludes('modules/UnitFramesTarget.lua', 'Target._frameRegistry');
+    assertSourceIncludes('modules/UnitFramesTarget.lua', 'Target._auraRoleRegistry');
+    assertSourceIncludes('modules/UnitFramesTarget.lua', 'Target._headerHookRegistry');
+    assertSourceIncludes('modules/UnitFramesRender.lua', 'Render._lowHPRegistry');
+    assertSourceIncludes('modules/UnitFramesRuntime.lua', 'Runtime._unitWatchRegistry');
+    assertSourceExcludes('modules/UnitFramesTarget.lua', /_fgui/, 'oUF target observer or aura metadata');
+    assertSourceExcludes('modules/UnitFramesRender.lua', /_fguiLowHP/, 'oUF low-health cache metadata');
+    assertSourceExcludes('modules/UnitFramesRuntime.lua', /_fguiUnitWatch/, 'oUF unit-watch metadata');
+    assertSourceExcludes('modules/UnitFramesTarget.lua', /unitframesCfg\.targetAuras\s*=/, 'runtime target-aura section repair');
+    assertSourceExcludes('modules/UnitFramesTarget.lua', /targetAuras\.mode\s*=/, 'runtime target-aura mode write');
+
     assertSourceIncludes('modules/ActionBarsState.lua', 'State._buttonRegistry');
     assertSourceIncludes('modules/ActionBarsState.lua', 'function State.GetButtonRecord');
     assertSourceIncludes('modules/ActionBarsVisuals.lua', 'Visuals._regionRegistry');

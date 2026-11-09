@@ -21,6 +21,17 @@ local combatStartTime = nil
 local combatTicker = nil
 
 Render._ctx = Render._ctx or EMPTY
+Render._lowHPRegistry = Render._lowHPRegistry or setmetatable({}, { __mode = "k" })
+local LowHPRegistry = Render._lowHPRegistry
+
+local function GetLowHPState(glow, create)
+    local state = glow and LowHPRegistry[glow] or nil
+    if not state and create == true and glow then
+        state = {}
+        LowHPRegistry[glow] = state
+    end
+    return state
+end
 
 local ConfigureTargetHelper
 
@@ -259,18 +270,21 @@ local function SafeUnitHealthPercent(unit)
 end
 
 local function HideLowHPGlow(frame)
-    if not frame or not frame.LowHPGlow then
+    local glow = frame and frame.LowHPGlow or nil
+    if not glow then
         return
     end
 
-    if frame._fguiLowHPVisible == true then
-        frame.LowHPGlow:Hide()
-        frame._fguiLowHPVisible = false
+    local state = GetLowHPState(glow, false)
+    if state and state.visible == true then
+        glow:Hide()
+        state.visible = false
     end
 end
 
 local function UpdatePlayerLowHPGlow(frame, unit, value, maxv, directPercent)
-    if not frame or unit ~= "player" or not frame.LowHPGlow then
+    local glow = frame and frame.LowHPGlow or nil
+    if not frame or unit ~= "player" or not glow then
         return
     end
 
@@ -316,23 +330,24 @@ local function UpdatePlayerLowHPGlow(frame, unit, value, maxv, directPercent)
     local r = color.r or 1.00
     local g = color.g or 0.12
     local b = color.b or 0.12
-    local updateColor = (frame._fguiLowHPR ~= r)
-        or (frame._fguiLowHPG ~= g)
-        or (frame._fguiLowHPB ~= b)
-        or (frame._fguiLowHPAlpha == nil)
-        or (math.abs((frame._fguiLowHPAlpha or 0) - alpha) > 0.01)
+    local state = GetLowHPState(glow, true)
+    local updateColor = (state.r ~= r)
+        or (state.g ~= g)
+        or (state.b ~= b)
+        or (state.a == nil)
+        or (math.abs((state.a or 0) - alpha) > 0.01)
 
     if updateColor then
-        frame.LowHPGlow:SetColorTexture(r, g, b, alpha)
-        frame._fguiLowHPR = r
-        frame._fguiLowHPG = g
-        frame._fguiLowHPB = b
-        frame._fguiLowHPAlpha = alpha
+        glow:SetColorTexture(r, g, b, alpha)
+        state.r = r
+        state.g = g
+        state.b = b
+        state.a = alpha
     end
 
-    if frame._fguiLowHPVisible ~= true then
-        frame.LowHPGlow:Show()
-        frame._fguiLowHPVisible = true
+    if state.visible ~= true then
+        glow:Show()
+        state.visible = true
     end
 end
 
