@@ -80,10 +80,36 @@ end
 ''',
     'Shell owner publication API',
 )
-count = shell.count('    GlobalHookState.owner = module\n')
-if count != 2:
-    raise RuntimeError(f'preemptive Shell owner publication: expected 2, found {count}')
-shell = shell.replace('    GlobalHookState.owner = module\n', '', 2)
+shell = replace_once(
+    shell,
+    '''function Shell.EnsureEndCapsHook(module)
+    if type(module) ~= "table" then
+        return false, "ActionBars shell hook owner unavailable"
+    end
+    GlobalHookState.owner = module
+''',
+    '''function Shell.EnsureEndCapsHook(module)
+    if type(module) ~= "table" then
+        return false, "ActionBars shell hook owner unavailable"
+    end
+''',
+    'remove preemptive EndCaps owner publication',
+)
+shell = replace_once(
+    shell,
+    '''function Shell.EnsureSettingsHooks(module)
+    if type(module) ~= "table" then
+        return false, "ActionBars settings hook owner unavailable"
+    end
+    GlobalHookState.owner = module
+''',
+    '''function Shell.EnsureSettingsHooks(module)
+    if type(module) ~= "table" then
+        return false, "ActionBars settings hook owner unavailable"
+    end
+''',
+    'remove preemptive Settings owner publication',
+)
 shell_path.write_text(shell, encoding='utf-8')
 
 
