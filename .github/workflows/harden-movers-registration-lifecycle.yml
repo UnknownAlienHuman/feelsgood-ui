@@ -23,6 +23,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python .codex/fix_movers_transform.py
           python .codex/harden_movers_registration_lifecycle.py
           git diff --check
 
@@ -84,7 +85,7 @@ jobs:
               assert not re.search(r'^\s*Movers:Register\(', source, re.M), f'unchecked Movers:Register in {filename}'
               assert not re.search(r'^\s*Movers:Apply\(', source, re.M), f'unchecked Movers:Apply in {filename}'
 
-          assert 'Mover registration lifecycle static contracts' not in check  # labels stay implementation-internal
+          assert 'Mover registration lifecycle static contracts' not in check
           assert 'local function RetireMoverEntry(owner, entry)' in check
           print('Mover lifecycle ownership audit passed.')
           PY
