@@ -3,6 +3,7 @@ local _, ns = ...
 
 local Runtime = {}
 ns.ActionBarsRuntime = Runtime
+Runtime._callbackOwner = nil
 
 local Log = ns.Log
 local DB = ns.DB
@@ -317,8 +318,8 @@ local function QueueDetachedRestore(module)
 end
 
 local function OnActionChanged(_, button)
-    local activeModule = ns.ActionBars
-    if IsDetached(activeModule) then return end
+    local activeModule = Runtime._callbackOwner
+    if not IsReady(activeModule) or IsDetached(activeModule) then return end
 
     if Visuals and Visuals.RefreshButtonVisualState then
         if Visuals.RefreshButtonVisualState(button) then return end
@@ -554,6 +555,25 @@ function Runtime.Init(module)
         end
     end
 
+    if State and type(State.SetStateHookOwner) == "function" then
+        local ownerOK, ownerDetail = State.SetStateHookOwner(module)
+        if ownerOK == false then
+            return false, tostring(ownerDetail or "ActionBars state hook owner publication failed")
+        end
+    end
+
+    if Shell and type(Shell.SetHookOwner) == "function" then
+        local ownerOK, ownerDetail = Shell.SetHookOwner(module)
+        if ownerOK == false then
+            if State and type(State.ReleaseStateHookOwner) == "function" then
+                State.ReleaseStateHookOwner(module)
+            end
+            return false, tostring(ownerDetail or "ActionBars shell hook owner publication failed")
+        end
+    end
+
+    Runtime._callbackOwner = callbackRegistered == true and module or nil
+
     if module._initDone then
         return true
     end
@@ -679,6 +699,9 @@ function Runtime.Detach(module)
         end
     end
     module._actionChangedCallbackRegistered = nil
+    if Runtime._callbackOwner == module then
+        Runtime._callbackOwner = nil
+    end
 
     if State and type(State.ReleaseStateHookOwner) == "function" then
         State.ReleaseStateHookOwner(module)

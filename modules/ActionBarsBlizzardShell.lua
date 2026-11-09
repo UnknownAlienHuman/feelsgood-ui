@@ -87,6 +87,14 @@ local function EnsureScriptHook(target, event, callback)
     return true
 end
 
+function Shell.SetHookOwner(module)
+    if type(module) ~= "table" or module._detached == true then
+        return false, "ActionBars shell hook owner unavailable"
+    end
+    GlobalHookState.owner = module
+    return true
+end
+
 function Shell.ReleaseHookOwner(module)
     if GlobalHookState.owner == module then
         GlobalHookState.owner = nil
@@ -641,7 +649,6 @@ function Shell.EnsureEndCapsHook(module)
     if type(module) ~= "table" then
         return false, "ActionBars shell hook owner unavailable"
     end
-    GlobalHookState.owner = module
 
     local mainActionBarMixin = _G.MainActionBarMixin
     if type(mainActionBarMixin) == "table" and type(mainActionBarMixin.UpdateEndCaps) == "function" then
@@ -665,7 +672,6 @@ function Shell.EnsureSettingsHooks(module)
     if type(module) ~= "table" then
         return false, "ActionBars settings hook owner unavailable"
     end
-    GlobalHookState.owner = module
 
     local firstDetail
     local settingsPanel = _G.SettingsPanel

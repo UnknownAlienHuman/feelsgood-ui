@@ -52,6 +52,14 @@ local function EnsureSecureMethodHook(target, method, callback)
     return true
 end
 
+function State.SetStateHookOwner(module)
+    if type(module) ~= "table" or module._detached == true then
+        return false, "ActionBars state hook owner unavailable"
+    end
+    GlobalHookState.owner = module
+    return true
+end
+
 function State.ReleaseStateHookOwner(module)
     if GlobalHookState.owner == module then
         GlobalHookState.owner = nil
@@ -639,7 +647,6 @@ function State.EnsureStateHooks(module, hasActionChangedCallback)
         return false, "ActionBars state hook owner unavailable"
     end
 
-    GlobalHookState.owner = module
     local firstDetail
 
     local function Ensure(target, method, callback, label)
