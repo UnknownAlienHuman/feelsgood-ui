@@ -1,0 +1,70 @@
+name: Fix UnitFrames replacement reconciliation
+
+on:
+  push:
+    branches:
+      - codex/unitframes-runtime-registries
+    paths:
+      - '.github/workflows/fix-unitframes-reconcile.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Verify fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "ad519e395adad647e78d05e32279c7fba1c6780e88f553b3a5eef7a6b7df35ec  .codex/fix_unitframes_reconcile.py" | sha256sum --check -
+          echo "0b47fa7ad35cf3178bb2a8f520785acea3360c9e37985092654e19a2fee4343a  .codex/test_unitframes_reconcile.lua" | sha256sum --check -
+
+      - name: Apply reconciliation fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .codex/fix_unitframes_reconcile.py
+          git diff --check
+
+      - name: Install Lua 5.1
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v lua5.1 >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y lua5.1
+          fi
+
+      - name: Run targeted reconciliation harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          lua5.1 .codex/test_unitframes_reconcile.lua
+
+      - name: Validate addon
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm test
+
+      - name: Commit validated product fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .codex
+          rm -f .github/workflows/fix-unitframes-reconcile.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Reconcile replaced UnitFrames owners" -m "Re-open target observer and aura-container ownership on every apply, propagate hook/reconciliation failures, and keep permanent hooks inert after detach."
+          git push origin HEAD:codex/unitframes-runtime-registries
