@@ -1,0 +1,107 @@
+name: Harden Options hook registries
+
+# Trigger after the workflow exists on the branch.
+on:
+  push:
+    branches:
+      - codex/options-hook-registries
+    paths:
+      - '.github/workflows/harden-options-hook-registries.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Apply Options ownership transform
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .codex/fix_options_transform.py
+          python .codex/harden_options_hook_registries.py
+          git diff --check
+
+      - name: Audit hook and listener ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          helpers = Path('core/OptionsSharedHelpers.lua').read_text()
+          panel = Path('core/OptionsPanelEditMode.lua').read_text()
+          movers = Path('core/Movers.lua').read_text()
+          check = Path('check_lua.js').read_text()
+
+          required = [
+              'Shared._adaptiveOwnerRegistry',
+              'Shared._adaptiveWidgetRegistry',
+              'Shared._numericParentRegistry',
+              'Shared._numericSliderRegistry',
+              'Shared._wheelProxyRegistry',
+              'local function EnsureHook',
+              'local function AttachWheelProxy',
+              'local function RegisterNumericSliderSync',
+          ]
+          for needle in required:
+              assert needle in helpers, f'missing Options registry contract: {needle}'
+
+          forbidden = [
+              '_fguiAdaptiveWidthHooked',
+              '_fguiNumericParentHooked',
+              '_fguiWheelProxy',
+          ]
+          for needle in forbidden:
+              assert needle not in helpers, f'legacy Options marker remains: {needle}'
+          assert '_fguiMoversStateListenerRegistered' not in panel
+          assert 'Movers._stateListeners = setmetatable({}, { __mode = "k" })' in movers
+          assert 'pcall(callback, owner._unlocked, owner, key)' in movers
+          assert 'local registered, detail = Movers:RegisterStateListener' in panel
+          assert re.search(r'local ok, detail = TryHookScript\(', helpers)
+          assert 'preemptive Options hook publication' in check
+          print('Options hook ownership audit passed.')
+          PY
+
+      - name: Install Lua 5.1
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v lua5.1 >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y lua5.1
+          fi
+
+      - name: Run Options hook registry harness
+        run: lua5.1 .codex/test_options_hook_registries.lua
+
+      - name: Run Movers listener registry harness
+        run: lua5.1 .codex/test_movers_listener_registry.lua
+
+      - name: Validate addon
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm test
+
+      - name: Commit validated product diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .codex
+          rm -f .github/workflows/harden-options-hook-registries.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Make Options hooks retryable" -m "Move adaptive-width, numeric-sync, wheel-proxy, and Edit Mode mover-listener ownership into weak registries; publish each edge only after successful registration and retry partial failures without widget or panel markers. Release FeelsGoodUI 0.0.65."
+          git push origin HEAD:codex/options-hook-registries
