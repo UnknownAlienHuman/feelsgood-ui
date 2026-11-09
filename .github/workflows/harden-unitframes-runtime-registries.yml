@@ -25,7 +25,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          base64 --decode .codex/ufreg.transform.py.gz.b64 | gzip --decompress > /tmp/harden_unitframes_runtime_registries.py
+          cat .codex/parts/ufreg.transform.part*.b64 | base64 --decode > /tmp/harden_unitframes_runtime_registries.py
           base64 --decode .codex/ufreg.harness.lua.gz.b64 | gzip --decompress > /tmp/test_unitframes_runtime_registries.lua
           echo "0a6696eff88733b6403fcbc7f0f2ab89a20716b4fa83c87fb5c6eccc82c4c247  /tmp/harden_unitframes_runtime_registries.py" | sha256sum --check -
           echo "8f7e7a0188308a4b5c61dab9f7327fdae98a44a8fb84b5bb990cdccf30c824aa  /tmp/test_unitframes_runtime_registries.lua" | sha256sum --check -
