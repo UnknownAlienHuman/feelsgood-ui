@@ -181,6 +181,9 @@ try {
     assertSourceExcludes('modules/ActionBarsState.lua', /module\._autoHideHooksAttached\s*=\s*true/, 'preemptive ActionBars holder-hook publication');
     assertSourceExcludes('modules/ActionBarsState.lua', /record\.autoHideHooks\s*=\s*true\s*\n\s*btn:HookScript/, 'preemptive ActionButton hook publication');
     assertSourceIncludes('modules/ActionBarsRuntime.lua', 'local hooksOK, hooksDetail = module:EnsureAutoHideHooks()');
+    assertSourceIncludes('modules/ActionBarsRuntime.lua', 'local ok, detail = Runtime.ApplyNow(module)');
+    assertSourceIncludes('modules/ActionBarsRuntime.lua', 'ActionBar " .. tostring(id)');
+    assertSourceIncludes('modules/ActionBarsState.lua', 'local readyField = name .. "Ready"');
     assertSourceIncludes('modules/ActionBarsVisuals.lua', 'if ok == false then return false, detail end');
 
     assertSourceIncludes('modules/ActionBarsState.lua', 'function State.GetButtonRecord');

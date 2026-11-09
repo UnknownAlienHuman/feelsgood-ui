@@ -118,6 +118,11 @@ end
 
 local function EnsureStateTexture(btn, record, name, drawLayer, subLevel, alpha, blendMode)
     record.layers = record.layers or {}
+    local readyField = name .. "Ready"
+    if record[readyField] == true and record.layers[name] then
+        return true
+    end
+
     local texture = record.layers[name]
     if not texture then
         if type(btn.CreateTexture) ~= "function" then
@@ -140,6 +145,8 @@ local function EnsureStateTexture(btn, record, name, drawLayer, subLevel, alpha,
     if not ok then
         return false, tostring(detail)
     end
+
+    record[readyField] = true
     return true
 end
 
@@ -182,6 +189,9 @@ end
 local function EnsureSlotBG(btn)
     local record = GetButtonRecord(btn, true)
     if not record then return false, "ActionButton record unavailable" end
+    if record.slotBackgroundReady == true and record.slotBackground then
+        return true
+    end
 
     local bg = record.slotBackground
     if not bg then
@@ -204,6 +214,8 @@ local function EnsureSlotBG(btn)
     if not ok then
         return false, tostring(detail)
     end
+
+    record.slotBackgroundReady = true
     return true
 end
 
@@ -293,7 +305,7 @@ State.UpdateButtonEmpty = UpdateEmptySlot
 
 function State.InitializeButton(btn)
     local record = GetButtonRecord(btn, false)
-    if not (btn and record and record.skinned) then return false end
+    if not (btn and record and record.skinned) then return false, "ActionButton is not managed" end
 
     local slotOK, slotDetail = EnsureSlotBG(btn)
     local layersOK, layersDetail = EnsureStateLayers(btn)
