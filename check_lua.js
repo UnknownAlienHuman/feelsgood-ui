@@ -216,6 +216,16 @@ try {
     assertSourceIncludes('modules/ExperienceBar.lua', 'SuppressBlizzardStatusTracking');
     assertSourceIncludes('modules/ExperienceBar.lua', 'module._statusTrackingSnapshot');
     assertSourceIncludes('modules/ExperienceBar.lua', 'MaintainStatusTrackingOwnership');
+    assertSourceIncludes('modules/ExperienceBar.lua', 'WriteFrameAlpha');
+    assertSourceIncludes('modules/ExperienceBar.lua', 'WriteFrameMouseEnabled');
+    assertSourceIncludes('modules/ExperienceBar.lua', 'RestoreStatusTrackingRecord');
+    assertSourceIncludes('modules/ExperienceBar.lua', 'record.alphaOwned');
+    assertSourceIncludes('modules/ExperienceBar.lua', 'record.mouseOwned');
+    assertSourceIncludes('modules/ExperienceBar.lua', 'local maintained, maintainDetail = MaintainStatusTrackingOwnership(self)');
+    assertSourceIncludes('modules/ExperienceBar.lua', 'local restored, restoreDetail = RestoreBlizzardStatusTracking(self)');
+    assertSourceExcludes('modules/ExperienceBar.lua', /module\._statusTrackingSnapshot\s*=\s*nil\s*\n\s*for frame/, 'preemptive ExperienceBar journal discard');
+    assertSourceExcludes('modules/ExperienceBar.lua', /CaptureStatusTrackingFrame\(module, frame\)[\s\S]{0,100}SetFrameAlpha\(frame, 0\)/, 'unverified native alpha takeover');
+    assertSourceExcludes('modules/ExperienceBar.lua', /MaintainStatusTrackingOwnership\(self\)\s*\n\s*ev:RegisterEvent/, 'ignored native status ownership result');
     assertSourceExcludes('modules/ExperienceBar.lua', /pcall\(frame\.Hide,\s*frame\)/, 'native status-frame Hide takeover');
     assertSourceExcludes('modules/ExperienceBar.lua', /function\s+XP:Enable\(/, 'parallel ExperienceBar lifecycle enable owner');
     assertSourceExcludes('modules/ExperienceBar.lua', /function\s+XP:Disable\(/, 'parallel ExperienceBar lifecycle disable owner');
