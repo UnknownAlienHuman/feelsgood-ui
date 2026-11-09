@@ -23,6 +23,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python .codex/fix_actionbars_transform.py
           python .codex/harden_actionbars_hook_ownership.py
           git diff --check
 
