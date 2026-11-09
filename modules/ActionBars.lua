@@ -88,10 +88,11 @@ function ActionBars:EnsureAutoHideHooks()
     return false, "ActionBars state owner unavailable"
 end
 
-function ActionBars:EnsureStateHooks()
+function ActionBars:EnsureStateHooks(hasActionChangedCallback)
     if State and State.EnsureStateHooks then
-        State.EnsureStateHooks(self)
+        return State.EnsureStateHooks(self, hasActionChangedCallback == true)
     end
+    return false, "ActionBars state hook owner unavailable"
 end
 
 function ActionBars:RefreshEmptySlots()
