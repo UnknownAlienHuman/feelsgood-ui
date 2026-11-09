@@ -24,6 +24,7 @@ jobs:
         run: |
           set -euo pipefail
           python .codex/refine_actionbars_active_owner.py
+          python .codex/fix_actionbars_global_hook_dispatch.py
           python .codex/refine_actionbars_active_owner_fixtures.py
           git diff --check
 
