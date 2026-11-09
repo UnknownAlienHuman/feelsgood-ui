@@ -96,8 +96,8 @@ jobs:
           for needle in forbidden:
               assert needle not in micro, f'preemptive hook publication remains: {needle}'
 
-          assert 'Companion source object marked hooked before HookScript succeeds' in check
-          assert 'recursive UpdateTextures call from its own secure hook' in check
+          assert 'preemptive Companion source hook publication' in check
+          assert 'StyleBackpackButton(button, cp.buttonSize or 32, true)' in check
           print('Companion permanent-hook ownership audit passed.')
           PY
 
