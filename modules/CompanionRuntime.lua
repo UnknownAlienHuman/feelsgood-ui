@@ -65,21 +65,49 @@ local function FinalizeDetach(module)
 end
 
 local function EnsureExpandChangedCallback(module)
-    if (not module._callbackHandles) and EventUtil and type(EventUtil.CreateCallbackHandleContainer) == "function" then
-        module._callbackHandles = EventUtil.CreateCallbackHandleContainer()
+    if module._expandCallbackRegistered then
+        return true
     end
 
-    if module._expandCallbackRegistered
-        or not module._callbackHandles
+    if not module._callbackHandles
+        and EventUtil
+        and type(EventUtil.CreateCallbackHandleContainer) == "function" then
+        local ok, handles = pcall(EventUtil.CreateCallbackHandleContainer)
+        if not ok then
+            return false, "Companion callback container creation failed: " .. tostring(handles)
+        end
+        module._callbackHandles = handles
+    end
+
+    if not module._callbackHandles
         or not EventRegistry
         or type(module._callbackHandles.RegisterCallback) ~= "function" then
-        return
+        return true
+    end
+
+    local ok, err = pcall(
+        module._callbackHandles.RegisterCallback,
+        module._callbackHandles,
+        EventRegistry,
+        "MainMenuBarManager.OnExpandChanged",
+        function()
+            local callbackOK, callbackErr = pcall(
+                MicroBags.HandleExpandChanged,
+                MicroBags,
+                GetActiveModule(module)
+            )
+            if not callbackOK and Log and type(Log.Error) == "function" then
+                Log:Error("Companion expand callback failed: " .. tostring(callbackErr))
+            end
+        end,
+        module
+    )
+    if not ok then
+        return false, "Companion expand callback registration failed: " .. tostring(err)
     end
 
     module._expandCallbackRegistered = true
-    module._callbackHandles:RegisterCallback(EventRegistry, "MainMenuBarManager.OnExpandChanged", function()
-        MicroBags:HandleExpandChanged(GetActiveModule(module))
-    end, module)
+    return true
 end
 
 local function GetCombatWatcher(module)
@@ -225,7 +253,10 @@ function Runtime.Attach(module)
     end
 
     local watcher = GetCombatWatcher(module)
-    EnsureExpandChangedCallback(module)
+    local callbackReady, callbackDetail = EnsureExpandChangedCallback(module)
+    if callbackReady == false then
+        return false, callbackDetail
+    end
 
     watcher:RegisterEvent("PLAYER_REGEN_ENABLED")
     watcher:RegisterEvent("PLAYER_ENTERING_WORLD")

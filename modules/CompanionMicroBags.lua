@@ -5,6 +5,7 @@ local _, ns = ...
 local MicroBags = {}
 ns.CompanionMicroBags = MicroBags
 
+local Log = ns.Log
 local Media = ns.Media
 local Movers = ns.Movers
 local Safety = ns.Safety
@@ -175,29 +176,114 @@ local function RequestManagedMicroRefresh()
     Run()
 end
 
-local function HookMicroSourceWidgets(module)
-    if not module then return false end
+local function ErrorText(err)
+    return tostring(err or "unknown Companion hook error")
+end
 
-    module._microSourceHooks = type(module._microSourceHooks) == "table"
-        and module._microSourceHooks
-        or {}
-    local hooks = module._microSourceHooks
-
-    local microMenu = _G.MicroMenu
-    if microMenu and not hooks[microMenu] and type(microMenu.HookScript) == "function" then
-        hooks[microMenu] = true
-        microMenu:HookScript("OnShow", RequestManagedMicroRefresh)
-        microMenu:HookScript("OnHide", RequestManagedMicroRefresh)
+local function GetWeakHookRegistry(module, field)
+    local registry = module[field]
+    if type(registry) ~= "table" then
+        registry = setmetatable({}, { __mode = "k" })
+        module[field] = registry
+        return registry
     end
 
-    local microButtons = GetMicroButtons()
-    for i = 1, #microButtons do
-        local button = microButtons[i]
-        if button and not hooks[button] and type(button.HookScript) == "function" then
-            hooks[button] = true
-            button:HookScript("OnShow", RequestManagedMicroRefresh)
-            button:HookScript("OnHide", RequestManagedMicroRefresh)
+    local meta = getmetatable(registry)
+    if type(meta) ~= "table" or meta.__mode ~= "k" then
+        local replacement = setmetatable({}, { __mode = "k" })
+        for object, record in pairs(registry) do
+            replacement[object] = type(record) == "table" and record or {}
         end
+        registry = replacement
+        module[field] = registry
+    end
+    return registry
+end
+
+local function AppendFailure(failures, label, detail)
+    failures[#failures + 1] = tostring(label) .. ": " .. ErrorText(detail)
+end
+
+local function RunPermanentHook(record, label, callback)
+    local ok, err = xpcall(callback, function(reason)
+        return ErrorText(reason)
+    end)
+    if ok then
+        record.lastError = nil
+        return true
+    end
+
+    local detail = tostring(label) .. ": " .. ErrorText(err)
+    if record.lastError ~= detail and Log and type(Log.Error) == "function" then
+        Log:Error(detail)
+    end
+    record.lastError = detail
+    return false
+end
+
+local function HookWidgetScript(record, widget, scriptName, callback)
+    if record[scriptName] == true then
+        return true
+    end
+    if type(widget.HookScript) ~= "function" then
+        return false, scriptName .. " HookScript unavailable"
+    end
+
+    local ok, err = pcall(widget.HookScript, widget, scriptName, callback)
+    if not ok then
+        return false, scriptName .. " hook failed: " .. ErrorText(err)
+    end
+    record[scriptName] = true
+    return true
+end
+
+local function HookMicroSourceWidgets(module)
+    local registry = GetWeakHookRegistry(module, "_microSourceHooks")
+    for _, record in pairs(registry) do
+        record.active = false
+    end
+
+    local sources, seen = {}, {}
+    local function AddSource(widget)
+        if widget and not seen[widget] then
+            seen[widget] = true
+            sources[#sources + 1] = widget
+        end
+    end
+
+    AddSource(_G.MicroMenu)
+    local buttons = GetMicroButtons()
+    for i = 1, #buttons do
+        AddSource(buttons[i])
+    end
+
+    local failures = {}
+    for i = 1, #sources do
+        local widget = sources[i]
+        local record = registry[widget]
+        if type(record) ~= "table" then
+            record = {}
+            registry[widget] = record
+        end
+        record.active = true
+
+        if type(record.callback) ~= "function" then
+            local source = widget
+            record.callback = function()
+                local current = registry[source]
+                if not current or current.active ~= true then return end
+                RunPermanentHook(current, "Companion micro source callback failed", RequestManagedMicroRefresh)
+            end
+        end
+
+        local showOK, showDetail = HookWidgetScript(record, widget, "OnShow", record.callback)
+        if showOK == false then AppendFailure(failures, "OnShow", showDetail) end
+        local hideOK, hideDetail = HookWidgetScript(record, widget, "OnHide", record.callback)
+        if hideOK == false then AppendFailure(failures, "OnHide", hideDetail) end
+    end
+
+    if #failures > 0 then
+        return false, table.concat(failures, "; ")
     end
     return true
 end
@@ -346,7 +432,7 @@ local function StyleBagButton(button, size)
     end
 end
 
-local function StyleBackpackButton(button, size)
+local function StyleBackpackButton(button, size, skipTextureRefresh)
     if not button then return end
 
     button:SetSize(size, size)
@@ -354,7 +440,7 @@ local function StyleBackpackButton(button, size)
         button:SetHitRectInsets(0, 0, 0, 0)
     end
 
-    if type(button.UpdateTextures) == "function" then
+    if not skipTextureRefresh and type(button.UpdateTextures) == "function" then
         pcall(button.UpdateTextures, button)
     end
 
@@ -975,47 +1061,125 @@ function MicroBags:Apply(module, cp, profile)
     return true
 end
 
-function MicroBags:EnsureHooks(module)
-    if not module then return false, "Companion hook owner unavailable" end
+local function ReconcileMicroResetHook(module, failures)
+    local registry = GetWeakHookRegistry(module, "_microResetHooks")
+    for _, record in pairs(registry) do
+        record.active = false
+    end
 
-    HookMicroSourceWidgets(module)
+    local menu = _G.MicroMenu
+    if not (type(menu) == "table" and type(menu.ResetMicroMenuPosition) == "function") then
+        return true
+    end
 
-    if (not module._microResetHooked)
-        and type(_G.MicroMenu) == "table"
-        and type(_G.MicroMenu.ResetMicroMenuPosition) == "function" then
-        module._microResetHooked = true
-        hooksecurefunc(_G.MicroMenu, "ResetMicroMenuPosition", function()
+    local record = registry[menu]
+    if type(record) ~= "table" then
+        record = {}
+        registry[menu] = record
+    end
+    record.active = true
+    if record.hooked == true then
+        return true
+    end
+    if type(hooksecurefunc) ~= "function" then
+        AppendFailure(failures, "MicroMenu.ResetMicroMenuPosition", "hooksecurefunc unavailable")
+        return false
+    end
+
+    local hookedMenu = menu
+    local callback = function()
+        local current = registry[hookedMenu]
+        if not current or current.active ~= true or _G.MicroMenu ~= hookedMenu then
+            return
+        end
+        RunPermanentHook(current, "Companion micro reset callback failed", function()
             local selfModule = ns.Companion
             if not ShouldRepairManagedMicroMenu(selfModule) then return end
             selfModule:RequestApply()
         end)
     end
 
-    module._bagTextureHooks = type(module._bagTextureHooks) == "table"
-        and module._bagTextureHooks
-        or {}
-    local bagHooks = module._bagTextureHooks
+    local ok, err = pcall(hooksecurefunc, menu, "ResetMicroMenuPosition", callback)
+    if not ok then
+        AppendFailure(failures, "MicroMenu.ResetMicroMenuPosition", err)
+        return false
+    end
+
+    record.hooked = true
+    record.callback = callback
+    return true
+end
+
+local function ReconcileBagTextureHooks(module, failures)
+    local registry = GetWeakHookRegistry(module, "_bagTextureHooks")
+    for _, record in pairs(registry) do
+        record.active = false
+    end
 
     local bagButtons = GetBagButtons()
     for i = 1, #bagButtons do
         local bagButton = bagButtons[i]
-        if bagButton and not bagHooks[bagButton] and type(bagButton.UpdateTextures) == "function" then
-            bagHooks[bagButton] = true
-            hooksecurefunc(bagButton, "UpdateTextures", function(button)
-                local selfModule = ns.Companion
-                if not IsManagedModuleActive(selfModule) then return end
-                local cp = Shared:GetCompanionCfg(nil)
-                if not Shared:ShouldManageBags(cp) then return end
-                if IsBackpackButton(button) then
-                    StyleBackpackButton(button, cp.buttonSize or 32)
-                    if type(button.SetCountShown) == "function" then
-                        pcall(button.SetCountShown, button, (cp.bags.compact ~= false) and false or true)
-                    end
+        if bagButton and type(bagButton.UpdateTextures) == "function" then
+            local record = registry[bagButton]
+            if type(record) ~= "table" then
+                record = {}
+                registry[bagButton] = record
+            end
+            record.active = true
+
+            if record.hooked ~= true then
+                if type(hooksecurefunc) ~= "function" then
+                    AppendFailure(failures, "BagButton.UpdateTextures", "hooksecurefunc unavailable")
                 else
-                    StyleBagButton(button, cp.buttonSize or 32)
+                    local hookedButton = bagButton
+                    local callback = function(button)
+                        local current = registry[hookedButton]
+                        if not current or current.active ~= true or button ~= hookedButton then
+                            return
+                        end
+                        RunPermanentHook(current, "Companion bag texture callback failed", function()
+                            local selfModule = ns.Companion
+                            if not IsManagedModuleActive(selfModule) then return end
+                            local cp = Shared:GetCompanionCfg(nil)
+                            if not Shared:ShouldManageBags(cp) then return end
+                            if IsBackpackButton(button) then
+                                StyleBackpackButton(button, cp.buttonSize or 32, true)
+                                if type(button.SetCountShown) == "function" then
+                                    pcall(button.SetCountShown, button, (cp.bags.compact ~= false) and false or true)
+                                end
+                            else
+                                StyleBagButton(button, cp.buttonSize or 32)
+                            end
+                        end)
+                    end
+
+                    local ok, err = pcall(hooksecurefunc, bagButton, "UpdateTextures", callback)
+                    if ok then
+                        record.hooked = true
+                        record.callback = callback
+                    else
+                        AppendFailure(failures, "BagButton.UpdateTextures", err)
+                    end
                 end
-            end)
+            end
         end
+    end
+end
+
+function MicroBags:EnsureHooks(module)
+    if not module then return false, "Companion hook owner unavailable" end
+
+    local failures = {}
+    local sourcesReady, sourceDetail = HookMicroSourceWidgets(module)
+    if sourcesReady == false then
+        AppendFailure(failures, "Micro source hooks", sourceDetail)
+    end
+
+    ReconcileMicroResetHook(module, failures)
+    ReconcileBagTextureHooks(module, failures)
+
+    if #failures > 0 then
+        return false, table.concat(failures, "; ")
     end
     return true
 end

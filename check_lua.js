@@ -189,8 +189,16 @@ try {
     assertSourceExcludes('modules/CompanionPetBar.lua', /ResetPetButtonParent/, 'guessed pet-button parent restore');
     assertSourceExcludes('modules/CompanionPetBar.lua', /pcall\(_G\.PetActionBar\.SetAlpha/, 'direct native pet-bar alpha takeover');
 
-    assertSourceIncludes('modules/CompanionMicroBags.lua', 'module._microSourceHooks');
-    assertSourceIncludes('modules/CompanionMicroBags.lua', 'module._bagTextureHooks');
+    assertSourceIncludes('modules/CompanionMicroBags.lua', 'GetWeakHookRegistry(module, "_microSourceHooks")');
+    assertSourceIncludes('modules/CompanionMicroBags.lua', 'GetWeakHookRegistry');
+    assertSourceIncludes('modules/CompanionMicroBags.lua', 'record.active = false');
+    assertSourceIncludes('modules/CompanionMicroBags.lua', 'StyleBackpackButton(button, cp.buttonSize or 32, true)');
+    assertSourceIncludes('modules/CompanionRuntime.lua', 'local callbackReady, callbackDetail = EnsureExpandChangedCallback(module)');
+    assertSourceExcludes('modules/CompanionMicroBags.lua', /hooks\[[^\]]+\]\s*=\s*true/, 'preemptive Companion source hook publication');
+    assertSourceExcludes('modules/CompanionMicroBags.lua', /bagHooks\[[^\]]+\]\s*=\s*true/, 'preemptive Companion bag hook publication');
+    assertSourceExcludes('modules/CompanionMicroBags.lua', /_microResetHooked/, 'single-object Companion reset hook flag');
+    assertSourceExcludes('modules/CompanionRuntime.lua', /_expandCallbackRegistered\s*=\s*true[\s\S]{0,160}RegisterCallback/, 'preemptive Companion callback publication');
+    assertSourceIncludes('modules/CompanionMicroBags.lua', 'GetWeakHookRegistry(module, "_bagTextureHooks")');
     assertSourceIncludes('modules/CompanionMicroBags.lua', 'module._bagCountTextByButton');
     assertSourceIncludes('modules/CompanionRuntime.lua', 'local petApplied, petDetail');
     assertSourceIncludes('modules/CompanionRuntime.lua', 'local microApplied, microDetail');
