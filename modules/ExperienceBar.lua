@@ -101,62 +101,266 @@ local STATUS_TRACKING_FRAME_NAMES = {
     "SecondaryStatusTrackingBarContainer",
 }
 
+local STATUS_TRACKING_MANAGED_ALPHA = 0
+local STATUS_TRACKING_MANAGED_MOUSE = false
+local STATUS_TRACKING_ALPHA_EPSILON = 0.0001
+
+local function FrameLabel(name, frame)
+    if type(name) == "string" and name ~= "" then
+        return name
+    end
+    if frame and type(frame.GetName) == "function" then
+        local ok, value = pcall(frame.GetName, frame)
+        if ok and type(value) == "string" and value ~= "" then
+            return value
+        end
+    end
+    return tostring(frame or "unknown frame")
+end
+
+local function SameAlpha(a, b)
+    return type(a) == "number"
+        and type(b) == "number"
+        and math.abs(a - b) <= STATUS_TRACKING_ALPHA_EPSILON
+end
+
 local function ReadFrameAlpha(frame)
-    if not (frame and type(frame.GetAlpha) == "function") then return nil end
+    if not (frame and type(frame.GetAlpha) == "function") then
+        return false, nil, "GetAlpha is unavailable"
+    end
     local ok, value = pcall(frame.GetAlpha, frame)
-    return ok and type(value) == "number" and value or nil
+    if not ok then
+        return false, nil, "GetAlpha failed: " .. tostring(value)
+    end
+    if type(value) ~= "number" then
+        return false, nil, "GetAlpha returned a non-number"
+    end
+    return true, value
 end
 
 local function ReadFrameMouseEnabled(frame)
-    if not (frame and type(frame.IsMouseEnabled) == "function") then return nil end
+    if not (frame and type(frame.IsMouseEnabled) == "function") then
+        return false, nil, "IsMouseEnabled is unavailable"
+    end
     local ok, value = pcall(frame.IsMouseEnabled, frame)
-    if not ok or type(value) ~= "boolean" then return nil end
-    return value
-end
-
-local function SetFrameAlpha(frame, value)
-    if not (frame and type(frame.SetAlpha) == "function" and type(value) == "number") then
-        return false
+    if not ok then
+        return false, nil, "IsMouseEnabled failed: " .. tostring(value)
     end
-    local current = ReadFrameAlpha(frame)
-    if current == value then return true end
-    return pcall(frame.SetAlpha, frame, value)
-end
-
-local function SetFrameMouseEnabled(frame, enabled)
-    if not (frame and type(frame.EnableMouse) == "function" and type(enabled) == "boolean") then
-        return false
+    if type(value) ~= "boolean" then
+        return false, nil, "IsMouseEnabled returned a non-boolean"
     end
-    local current = ReadFrameMouseEnabled(frame)
-    if current == enabled then return true end
-    return pcall(frame.EnableMouse, frame, enabled)
+    return true, value
 end
 
-local function CaptureStatusTrackingFrame(module, frame)
-    if type(module) ~= "table" or type(frame) ~= "table" then return nil end
-    module._statusTrackingSnapshot = type(module._statusTrackingSnapshot) == "table"
-        and module._statusTrackingSnapshot
-        or {}
+local function WriteFrameAlpha(frame, value)
+    local readable, current, readDetail = ReadFrameAlpha(frame)
+    if not readable then
+        return false, readDetail
+    end
+    if SameAlpha(current, value) then
+        return true
+    end
+    if type(frame.SetAlpha) ~= "function" then
+        return false, "SetAlpha is unavailable"
+    end
 
-    local record = module._statusTrackingSnapshot[frame]
-    if record then return record end
+    local ok, err = pcall(frame.SetAlpha, frame, value)
+    if not ok then
+        return false, "SetAlpha failed: " .. tostring(err)
+    end
 
-    record = {
-        alpha = ReadFrameAlpha(frame),
-        mouseEnabled = ReadFrameMouseEnabled(frame),
-    }
-    module._statusTrackingSnapshot[frame] = record
+    local verified, actual, verifyDetail = ReadFrameAlpha(frame)
+    if not verified then
+        return false, "SetAlpha could not be verified: " .. tostring(verifyDetail)
+    end
+    if not SameAlpha(actual, value) then
+        return false, "SetAlpha did not retain the requested value"
+    end
+    return true
+end
+
+local function WriteFrameMouseEnabled(frame, enabled)
+    local readable, current, readDetail = ReadFrameMouseEnabled(frame)
+    if not readable then
+        return false, readDetail
+    end
+    if current == enabled then
+        return true
+    end
+    if type(frame.EnableMouse) ~= "function" then
+        return false, "EnableMouse is unavailable"
+    end
+
+    local ok, err = pcall(frame.EnableMouse, frame, enabled)
+    if not ok then
+        return false, "EnableMouse failed: " .. tostring(err)
+    end
+
+    local verified, actual, verifyDetail = ReadFrameMouseEnabled(frame)
+    if not verified then
+        return false, "EnableMouse could not be verified: " .. tostring(verifyDetail)
+    end
+    if actual ~= enabled then
+        return false, "EnableMouse did not retain the requested value"
+    end
+    return true
+end
+
+local function GetStatusTrackingSnapshot(module)
+    if type(module) ~= "table" then return nil end
+    local snapshot = module._statusTrackingSnapshot
+    if type(snapshot) ~= "table" then
+        snapshot = {}
+        module._statusTrackingSnapshot = snapshot
+    end
+    return snapshot
+end
+
+local function CaptureStatusTrackingFrame(module, name, frame)
+    if type(module) ~= "table" or type(frame) ~= "table" then
+        return nil
+    end
+
+    local snapshot = GetStatusTrackingSnapshot(module)
+    local record = snapshot[frame]
+    if type(record) ~= "table" then
+        record = { name = name }
+        snapshot[frame] = record
+    elseif not record.name then
+        record.name = name
+    end
+
+    if record.alphaCaptured ~= true and record.alphaOwned ~= true then
+        local ok, value, detail = ReadFrameAlpha(frame)
+        if ok then
+            record.alpha = value
+            record.alphaCaptured = true
+            record.alphaCaptureDetail = nil
+        else
+            record.alphaCaptureDetail = detail
+        end
+    end
+
+    if record.mouseCaptured ~= true and record.mouseOwned ~= true then
+        local ok, value, detail = ReadFrameMouseEnabled(frame)
+        if ok then
+            record.mouseEnabled = value
+            record.mouseCaptured = true
+            record.mouseCaptureDetail = nil
+        else
+            record.mouseCaptureDetail = detail
+        end
+    end
+
     return record
 end
 
-local function SuppressBlizzardStatusTracking(module)
-    for i = 1, #STATUS_TRACKING_FRAME_NAMES do
-        local frame = _G[STATUS_TRACKING_FRAME_NAMES[i]]
-        if type(frame) == "table" then
-            CaptureStatusTrackingFrame(module, frame)
-            SetFrameAlpha(frame, 0)
-            SetFrameMouseEnabled(frame, false)
+local function SuppressStatusTrackingFrame(module, name, frame)
+    local record = CaptureStatusTrackingFrame(module, name, frame)
+    if not record then
+        return false, FrameLabel(name, frame) .. ": snapshot unavailable"
+    end
+
+    local failures = {}
+    local label = FrameLabel(record.name or name, frame)
+
+    if record.alphaCaptured ~= true then
+        failures[#failures + 1] = label .. ".alpha: " .. tostring(record.alphaCaptureDetail or "original value is unreadable")
+    else
+        local ok, detail = WriteFrameAlpha(frame, STATUS_TRACKING_MANAGED_ALPHA)
+        if ok then
+            record.alphaOwned = true
+        else
+            failures[#failures + 1] = label .. ".alpha: " .. tostring(detail)
         end
+    end
+
+    if record.mouseCaptured ~= true then
+        failures[#failures + 1] = label .. ".mouse: " .. tostring(record.mouseCaptureDetail or "original value is unreadable")
+    else
+        local ok, detail = WriteFrameMouseEnabled(frame, STATUS_TRACKING_MANAGED_MOUSE)
+        if ok then
+            record.mouseOwned = true
+        else
+            failures[#failures + 1] = label .. ".mouse: " .. tostring(detail)
+        end
+    end
+
+    if #failures > 0 then
+        return false, table.concat(failures, "; ")
+    end
+    return true
+end
+
+local function SuppressBlizzardStatusTracking(module)
+    local failures = {}
+    for i = 1, #STATUS_TRACKING_FRAME_NAMES do
+        local name = STATUS_TRACKING_FRAME_NAMES[i]
+        local frame = _G[name]
+        if type(frame) == "table" then
+            local ok, detail = SuppressStatusTrackingFrame(module, name, frame)
+            if ok == false then
+                failures[#failures + 1] = tostring(detail)
+            end
+        end
+    end
+
+    if #failures > 0 then
+        return false, table.concat(failures, "; ")
+    end
+    return true
+end
+
+local function ClearReleasedRecord(snapshot, frame, record)
+    if record.alphaOwned ~= true and record.mouseOwned ~= true then
+        snapshot[frame] = nil
+    end
+end
+
+local function RestoreStatusTrackingRecord(frame, record)
+    if type(frame) ~= "table" or type(record) ~= "table" then
+        return true
+    end
+
+    local failures = {}
+    local label = FrameLabel(record.name, frame)
+
+    if record.alphaOwned == true then
+        local readable, current, detail = ReadFrameAlpha(frame)
+        if not readable then
+            failures[#failures + 1] = label .. ".alpha restore: " .. tostring(detail)
+        elseif SameAlpha(current, STATUS_TRACKING_MANAGED_ALPHA) then
+            local restored, restoreDetail = WriteFrameAlpha(frame, record.alpha)
+            if restored then
+                record.alphaOwned = nil
+            else
+                failures[#failures + 1] = label .. ".alpha restore: " .. tostring(restoreDetail)
+            end
+        else
+            -- A newer owner changed the value while attached; do not overwrite it.
+            record.alphaOwned = nil
+        end
+    end
+
+    if record.mouseOwned == true then
+        local readable, current, detail = ReadFrameMouseEnabled(frame)
+        if not readable then
+            failures[#failures + 1] = label .. ".mouse restore: " .. tostring(detail)
+        elseif current == STATUS_TRACKING_MANAGED_MOUSE then
+            local restored, restoreDetail = WriteFrameMouseEnabled(frame, record.mouseEnabled)
+            if restored then
+                record.mouseOwned = nil
+            else
+                failures[#failures + 1] = label .. ".mouse restore: " .. tostring(restoreDetail)
+            end
+        else
+            -- A newer owner changed the value while attached; do not overwrite it.
+            record.mouseOwned = nil
+        end
+    end
+
+    if #failures > 0 then
+        return false, table.concat(failures, "; ")
     end
     return true
 end
@@ -165,54 +369,112 @@ local function RestoreBlizzardStatusTracking(module)
     local snapshot = module and module._statusTrackingSnapshot
     if type(snapshot) ~= "table" then return true end
 
-    module._statusTrackingSnapshot = nil
+    local failures = {}
     for frame, record in pairs(snapshot) do
-        if type(frame) == "table" and type(record) == "table" then
-            -- Restore only properties that still carry our suppression value.
-            -- A different owner changing them while attached wins.
-            if type(record.alpha) == "number" and ReadFrameAlpha(frame) == 0 then
-                SetFrameAlpha(frame, record.alpha)
-            end
-            if type(record.mouseEnabled) == "boolean" and ReadFrameMouseEnabled(frame) == false then
-                SetFrameMouseEnabled(frame, record.mouseEnabled)
-            end
+        local ok, detail = RestoreStatusTrackingRecord(frame, record)
+        if ok == false then
+            failures[#failures + 1] = tostring(detail)
         end
+        ClearReleasedRecord(snapshot, frame, record)
+    end
+
+    if next(snapshot) == nil then
+        module._statusTrackingSnapshot = nil
+    end
+    if #failures > 0 then
+        return false, table.concat(failures, "; ")
     end
     return true
 end
 
-local function EnsureStatusTrackingHooks(module)
-    if module._statusTrackingHooked then return true end
+local function ReportStatusTrackingFailure(module, detail)
+    detail = tostring(detail or "unknown native status-tracking failure")
+    if module._statusTrackingLastError == detail then
+        return
+    end
+    module._statusTrackingLastError = detail
+    if Log and type(Log.Error) == "function" then
+        Log:Error("ExperienceBar native status tracking failed: " .. detail)
+    end
+end
 
+local function ClearStatusTrackingFailure(module)
+    module._statusTrackingLastError = nil
+end
+
+local MaintainStatusTrackingOwnership
+
+local function EnsureStatusTrackingHooks(module)
     local manager = _G.StatusTrackingBarManager
-    local secureHook = _G.hooksecurefunc or hooksecurefunc
-    if type(manager) ~= "table" or type(secureHook) ~= "function" then
-        return false
+    if type(manager) ~= "table" then
+        return true, "StatusTrackingBarManager pending runtime creation"
     end
 
-    local hooked = false
-    local function Resuppress()
-        if module._suppressBlizzardTracking == true then
-            SuppressBlizzardStatusTracking(module)
+    local secureHook = _G.hooksecurefunc or hooksecurefunc
+    if type(secureHook) ~= "function" then
+        return false, "hooksecurefunc is unavailable"
+    end
+
+    if module._statusTrackingHookOwner ~= manager then
+        module._statusTrackingHookOwner = manager
+        module._statusTrackingHookMethods = {}
+    end
+    local methods = module._statusTrackingHookMethods
+
+    if type(module._statusTrackingResuppress) ~= "function" then
+        module._statusTrackingResuppress = function()
+            if module._suppressBlizzardTracking ~= true then return end
+            local ok, detail = MaintainStatusTrackingOwnership(module)
+            if ok == false then
+                ReportStatusTrackingFailure(module, detail)
+            else
+                ClearStatusTrackingFailure(module)
+            end
         end
     end
 
-    if type(manager.UpdateBarsShown) == "function" then
-        secureHook(manager, "UpdateBarsShown", Resuppress)
-        hooked = true
-    end
-    if type(manager.UpdateBarVisuals) == "function" then
-        secureHook(manager, "UpdateBarVisuals", Resuppress)
-        hooked = true
+    local available = 0
+    local failures = {}
+    for _, methodName in ipairs({ "UpdateBarsShown", "UpdateBarVisuals" }) do
+        if type(manager[methodName]) == "function" then
+            available = available + 1
+            if methods[methodName] ~= true then
+                local ok, err = pcall(secureHook, manager, methodName, module._statusTrackingResuppress)
+                if ok then
+                    methods[methodName] = true
+                else
+                    failures[#failures + 1] = methodName .. " hook failed: " .. tostring(err)
+                end
+            end
+        end
     end
 
-    module._statusTrackingHooked = hooked
-    return hooked
+    if #failures > 0 then
+        return false, table.concat(failures, "; ")
+    end
+    if available == 0 then
+        return true, "StatusTrackingBarManager methods pending runtime creation"
+    end
+    return true
 end
 
-local function MaintainStatusTrackingOwnership(module)
-    EnsureStatusTrackingHooks(module)
-    return SuppressBlizzardStatusTracking(module)
+MaintainStatusTrackingOwnership = function(module)
+    local failures = {}
+    local hooked, hookDetail = EnsureStatusTrackingHooks(module)
+    if hooked == false then
+        failures[#failures + 1] = tostring(hookDetail)
+    end
+
+    local suppressed, suppressDetail = SuppressBlizzardStatusTracking(module)
+    if suppressed == false then
+        failures[#failures + 1] = tostring(suppressDetail)
+    end
+
+    if #failures > 0 then
+        return false, table.concat(failures, "; ")
+    end
+    ClearStatusTrackingFailure(module)
+    return true
 end
 
 local function SetBarVisible(bar, shouldShow, immediate)
@@ -588,7 +850,10 @@ local function EnsureEventFrame(module)
             return
         end
         if module._suppressBlizzardTracking == true then
-            MaintainStatusTrackingOwnership(module)
+            local maintained, maintainDetail = MaintainStatusTrackingOwnership(module)
+            if maintained == false then
+                ReportStatusTrackingFailure(module, maintainDetail)
+            end
         end
         if type(module.Update) == "function" then
             module:Update()
@@ -613,13 +878,20 @@ function XP:ApplyConfig()
     ev:UnregisterAllEvents()
     if not cfg.enabled then
         self._suppressBlizzardTracking = nil
-        RestoreBlizzardStatusTracking(self)
+        local restored, restoreDetail = RestoreBlizzardStatusTracking(self)
         SetBarVisible(bar, false, true)
+        if restored == false then
+            return false, restoreDetail
+        end
+        ClearStatusTrackingFailure(self)
         return true
     end
 
     self._suppressBlizzardTracking = true
-    MaintainStatusTrackingOwnership(self)
+    local maintained, maintainDetail = MaintainStatusTrackingOwnership(self)
+    if maintained == false then
+        return false, maintainDetail
+    end
 
     ev:RegisterEvent("PLAYER_ENTERING_WORLD")
     ev:RegisterEvent("PLAYER_XP_UPDATE")
@@ -652,10 +924,14 @@ function XP:Detach()
         self._events:UnregisterAllEvents()
     end
     self._suppressBlizzardTracking = nil
-    RestoreBlizzardStatusTracking(self)
+    local restored, restoreDetail = RestoreBlizzardStatusTracking(self)
     if self._bar then
         SetBarVisible(self._bar, false, true)
     end
+    if restored == false then
+        return false, restoreDetail
+    end
+    ClearStatusTrackingFailure(self)
     return true
 end
 

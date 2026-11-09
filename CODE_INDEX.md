@@ -24,5 +24,5 @@
 | `modules/CompanionRuntime.lua` | Result-bearing Companion lifecycle/apply coordinator and partial-layer cleanup. |
 | `modules/CompanionPetState.lua` | Exact original/managed PetActionButton and native PetActionBar snapshot journal with conflict-aware restore. |
 | `modules/CompanionMicroBags.lua`, `modules/CompanionPetBar.lua`, `modules/CompanionShared.lua` | Owner-local hook/cache state plus pet-bar, micro-menu, and bag presentation layers. |
-| `modules/ExperienceBar.lua` | XP/reputation/honor presentation, single lifecycle apply owner, and reversible Blizzard status-tracking alpha/mouse suppression. |
+| `modules/ExperienceBar.lua` | XP/reputation/honor presentation, single lifecycle apply owner, and a verified, retryable per-property Blizzard status-tracking journal. |
 | `docs/` | Plans, archived work, architecture ledger, and regression material. |

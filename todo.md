@@ -4,7 +4,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 
 ## Retail 12.1.5 implementation status
 
-- [x] Target Interface `120105` and release `0.0.62`.
+- [x] Target Interface `120105` and release `0.0.63`.
 - [x] Gate Secret/Restricted Values before Lua inspection, conversion, comparison, or formatting.
 - [x] Integrate restricted Unit Frame and Center Bar handling into the canonical render/target owners; remove late method overrides and duplicate producer calls.
 - [x] Keep opaque power/text on exact native sinks where available; otherwise render an explicit unavailable state.
@@ -32,6 +32,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 - [x] Move ActionBars runtime metadata off Blizzard ActionButton/FontString/Cooldown objects into weak-key button/region registries; hooks resolve current owner/layers through the registry and no callback/style cache is stored on foreign frames.
 - [x] Remove generic caller-object metadata: Animate fade/timer state and Minimap LibDBIcon hook state live in weak registries, active drag is button-specific, and the unused arbitrary cooldown-frame cache helper is deleted.
 - [x] Move UnitFrames target observers, aura roles, header-hook state, low-health cache and unit-watch ownership off oUF frames/elements into weak registries; remove target-aura runtime persistence writes and propagate native watch failures.
+- [x] Make ExperienceBar native takeover a verified property journal: refuse unreadable channels, read back every write, retain unresolved restore state for retry, reopen hooks on manager replacement, preserve newer conflicts, and propagate exact hook/suppress/restore failures.
 
 ## Required in-game validation
 
@@ -48,7 +49,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 - [ ] Start an import that remains combat-deferred, then `/reload` or log out before commit; next startup restores the previous profile and overlays any newer post-import edits, then removes the recovery record.
 - [ ] Hold a long mover drag/resize and verify zero SavedVariables writes, zero apply requests, and zero undo entries before the terminal input event.
 - [ ] Resize/scale ActionBars, UnitFrames, CenterBars, Companion PetBar, and ExperienceBar; each terminal action produces one undo entry and one owner apply.
-- [ ] Give Blizzard status-tracking manager/containers distinctive alpha, mouse and visibility states, enable/disable ExperienceBar repeatedly, trigger native refreshes, and verify no foreign `Hide`/`Show`, one lifecycle apply, exact owned-property restore, and preservation of conflicting newer changes.
+- [ ] Give Blizzard status-tracking manager/containers distinctive alpha, mouse and visibility states; inject unreadable alpha/mouse, stubborn setters, hook failure, manager replacement and restore failure; ExperienceBar must never mutate unreadable channels, must report exact failures, retain retryable unresolved records, avoid duplicate hooks/writes, restore exact still-owned values, and preserve newer conflicts without foreign `Hide`/`Show`.
 - [ ] Repeatedly skin and restore Blizzard pet/micro/bag buttons; border frames are reused through `Media` without any `__fguiBorder*` fields on the target buttons, and transparent release is reversed by the next theme/style apply.
 - [ ] Force hook initialization, missing pet buttons, and MicroBags layer failures; Companion never stamps `_fguiCompanionHooked`/`_fguiSquareSkinHooked`/count metadata on Blizzard frames, partial layers restore, and the exact failure reaches Lifecycle/Apply.
 - [ ] Give each PetActionButton and PetActionBar distinctive parent/points/size/hit-rect/visibility/alpha/texture/mask/name/cooldown/hotkey state, apply twice, replace one button, make one conflicting external change, then detach; exact still-owned state restores without guessed defaults or overwriting the conflict.
