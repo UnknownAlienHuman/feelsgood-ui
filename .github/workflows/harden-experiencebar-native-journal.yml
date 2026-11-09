@@ -1,0 +1,99 @@
+name: Harden ExperienceBar native journal
+
+on:
+  push:
+    branches:
+      - codex/experiencebar-native-journal
+    paths:
+      - '.github/workflows/harden-experiencebar-native-journal.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Reconstruct verified transform and harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 --decode .codex/experiencebar.transform.py.gz.b64 | gzip --decompress > /tmp/harden_experiencebar_native_journal.py
+          base64 --decode .codex/experiencebar.harness.lua.gz.b64 | gzip --decompress > /tmp/test_experiencebar_native_journal.lua
+          echo "81abf82646c6c88b4a0184286247ed88f36128e839264cfe37e3451384462d4d  /tmp/harden_experiencebar_native_journal.py" | sha256sum --check -
+          echo "9f04eb4351dd4fa6bcb34bca10f3a6e65488ef01780c8d3e26b752c71f8e1cc9  /tmp/test_experiencebar_native_journal.lua" | sha256sum --check -
+
+      - name: Apply verified journal transform
+        shell: bash
+        run: |
+          set -euo pipefail
+          python /tmp/harden_experiencebar_native_journal.py
+          git diff --check
+
+      - name: Audit native ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path('modules/ExperienceBar.lua').read_text()
+          check = Path('check_lua.js').read_text()
+          required = [
+              'WriteFrameAlpha',
+              'WriteFrameMouseEnabled',
+              'RestoreStatusTrackingRecord',
+              'record.alphaOwned',
+              'record.mouseOwned',
+              'local maintained, maintainDetail = MaintainStatusTrackingOwnership(self)',
+              'local restored, restoreDetail = RestoreBlizzardStatusTracking(self)',
+          ]
+          for needle in required:
+              assert needle in source, f'missing ExperienceBar journal contract: {needle}'
+          assert 'module._statusTrackingSnapshot = nil\n    for frame' not in source
+          assert 'verified per-frame/per-property alpha/mouse journal' in Path('README.md').read_text()
+          assert 'preemptive ExperienceBar journal discard' in check
+          print('ExperienceBar native ownership audit passed.')
+          PY
+
+      - name: Install Lua 5.1
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v lua5.1 >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y lua5.1
+          fi
+
+      - name: Run verified native journal harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          luac5.1 -p /tmp/test_experiencebar_native_journal.lua
+          lua5.1 /tmp/test_experiencebar_native_journal.lua
+
+      - name: Validate addon
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm test
+
+      - name: Commit validated product diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .codex
+          rm -f .github/workflows/harden-experiencebar-native-journal.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Verify ExperienceBar native takeover" -m "Journal readable alpha and mouse channels per native status frame, verify every write, retain unresolved restore state for retry, reopen hooks on manager replacement, preserve newer conflicts, and propagate exact hook/suppress/restore failures. Release FeelsGoodUI 0.0.63."
+          git push origin HEAD:codex/experiencebar-native-journal
