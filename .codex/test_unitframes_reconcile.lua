@@ -38,9 +38,11 @@ local function NewObserver()
 end
 
 local function NewTargetFrame(buffs, debuffs)
-    local header = {}
+    local header = { shown = true }
     function header:ClearAllPoints() end
     function header:SetPoint() end
+    function header:Show() self.shown = true end
+    function header:Hide() self.shown = false end
     return {
         unit = "target",
         Buffs = buffs or NewAuraElement(),
