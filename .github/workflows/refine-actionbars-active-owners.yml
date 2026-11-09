@@ -24,6 +24,7 @@ jobs:
         run: |
           set -euo pipefail
           python .codex/refine_actionbars_active_owner.py
+          python .codex/fix_actionbars_callback_owner_guard.py
           python .codex/fix_actionbars_global_hook_dispatch.py
           python .codex/refine_actionbars_active_owner_fixtures.py
           git diff --check
@@ -51,6 +52,7 @@ jobs:
 
           assert 'Runtime._callbackOwner = nil' in runtime
           assert 'local activeModule = Runtime._callbackOwner' in runtime
+          assert 'if not IsReady(activeModule) or IsDetached(activeModule) then return end' in runtime
           init = runtime.split('function Runtime.Init(module)', 1)[1].split('function Runtime.Attach(module)', 1)[0]
           assert init.index('State.SetStateHookOwner(module)') > init.index('local endCapsOK, endCapsDetail')
           assert init.index('Shell.SetHookOwner(module)') > init.index('local endCapsOK, endCapsDetail')
@@ -94,5 +96,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "Delay ActionBars owner publication" -m "Keep partially installed permanent hooks and registered callbacks inert until callback, state, and shell initialization all succeed; publish active owners atomically and clear them during detach."
+          git commit -m "Delay ActionBars owner publication" -m "Keep partially installed permanent hooks and registered callbacks inert until callback, state, and shell initialization all succeed; publish active owners atomically, reject nil callback owners, and clear owners during detach."
           git push origin HEAD:codex/actionbars-global-hooks
