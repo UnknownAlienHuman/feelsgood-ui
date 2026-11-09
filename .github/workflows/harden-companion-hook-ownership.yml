@@ -27,12 +27,12 @@ jobs:
           set -euo pipefail
           cat <<'SUMS' | sha256sum --check -
           388525d7704f5b89cd1ef8b5b204090f6149f880265626701272251670692e28  .codex/parts/companion.transform.part00.b64
-          1b239e712620c35004ed44f8ac7d5afd3ec3a9e553ec4a3dd54b8a84fceb1eca  .codex/parts/companion.transform.part01.b64
-          86c6be68c78f42d266367000f754a4a230e3eee2e9a7b4d9d6b17dbb346a4cc0  .codex/parts/companion.transform.part02.b64
-          7d0886388f027dc9a856b3d625cd7148642885f6218a50540c0391c4e3ffb905  .codex/parts/companion.transform.part03.b64
-          db26f2a767f2d8bb3ffafd28669d7b2e758f86485b95f23aa28101c06dd4c7d6  .codex/parts/companion.transform.part04.b64
-          f2de98fc1aef954457c0ad7b3513d773bf19fd76f7ca949c8370b3cf4a939ecc  .codex/parts/companion.transform.part05.b64
-          ae73aa39f9aa8b89dfe2082cabe46ce4d0f483b3d2465daf803b1ddfaa7fc6b8  .codex/parts/companion.transform.part06.b64
+          43445269d7994b3dd8bbc213f6a5c3eaa74396c07ee70e0f4db000676da80574  .codex/parts/companion.transform.part01.b64
+          9d0227f40e9e815ea574555785a93bf92ac889999c427328a1590637f74da0a7  .codex/parts/companion.transform.part02.b64
+          305ce4ba8e429ba6733b3341bda532917db743a0dfe2824e41f95212f5f06f81  .codex/parts/companion.transform.part03.b64
+          118cf464e1285badfad33f17a262293743c2df24c2001049c398b43b0a362725  .codex/parts/companion.transform.part04.b64
+          09be502738e3addb7f9893624d7b1c9ced3791f0f7e914c90ce493e9d4baf9f9  .codex/parts/companion.transform.part05.b64
+          b323150e697e7dfaa88f2de050e5ca97e61fa742ba93c7b0349b6b9440760aea  .codex/parts/companion.transform.part06.b64
           efd5bf32865ac7360b738e9fd45470d347a4090cac3911f7bce17c5570a5235f  .codex/parts/companion.harness.part00.b64
           d9a87e26069889843d8fe8ebab823620a08e48971905fcc85cc2c2aa0d14625a  .codex/parts/companion.harness.part01.b64
           e3d4ba0fd8c25bbb7721d69d0f3a33540793f201956615287bcf9c4348a1a544  .codex/parts/companion.harness.part02.b64
@@ -42,12 +42,12 @@ jobs:
 
           cat .codex/parts/companion.transform.part*.b64 > /tmp/companion.transform.gz.b64
           cat .codex/parts/companion.harness.part*.b64 > /tmp/companion.harness.gz.b64
-          echo "af4beecf3534c81306bc50ce7b3783d3dc057ba6182abb0b4b00088712b76bd8  /tmp/companion.transform.gz.b64" | sha256sum --check -
+          echo "9b11e54396ae5df8800d822916bcd5c0df9653ba74448dcc4efab8b4de89873f  /tmp/companion.transform.gz.b64" | sha256sum --check -
           echo "98475564da6c428ec7a0a0f4553a213630c4fa088a9b8551e0a1663f9939fdec  /tmp/companion.harness.gz.b64" | sha256sum --check -
 
           base64 --decode /tmp/companion.transform.gz.b64 | gzip --decompress > /tmp/harden_companion_hook_ownership.py
           base64 --decode /tmp/companion.harness.gz.b64 | gzip --decompress > /tmp/test_companion_hook_ownership.lua
-          echo "dbec99bfe13790b139c4912b90698387aa8fbb7fdae7710dfb2c257da9f27ce9  /tmp/harden_companion_hook_ownership.py" | sha256sum --check -
+          echo "d0b9d02ccf6c17ec8f4fa9126ea15d08a575b52cde1a4f3b47e969e42398a812  /tmp/harden_companion_hook_ownership.py" | sha256sum --check -
           echo "c0330687e8d71fbf0c5016860badced33fd1dd28274064c5ac072a4460be8180  /tmp/test_companion_hook_ownership.lua" | sha256sum --check -
 
       - name: Apply verified ownership transform
