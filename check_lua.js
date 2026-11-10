@@ -326,6 +326,15 @@ try {
     assertSourceIncludes('core/FeatureRegistry.lua', 'movers = {');
     assertSourceIncludes('core/PanelTransactions.lua', 'function Tx:RollbackAfter(checkpoint, keys)');
     assertSourceIncludes('core/Movers.lua', 'local function RetireMoverEntry(owner, entry)');
+    assertSourceIncludes('core/Movers.lua', 'supplied frame does not own mover key');
+    assertSourceIncludes('core/Movers.lua', 'local function PresentUnlockedState(owner, unlocked)');
+    assertSourceIncludes('core/Movers.lua', 'owner._unlocked = previous');
+    assertSourceIncludes('core/Movers.lua', 'existing.spec = previousSpec');
+    assertSourceIncludes('core/Movers.lua', 'local visible, visibilityDetail = SetEntryOverlayVisible');
+    assertSourceIncludes('modules/ExperienceBar.lua', 'module._moverReadyFrame ~= bar or not moverEntry or moverEntry.frame ~= bar');
+    assertSourceIncludes('modules/CompanionPetBar.lua', 'module._petMoverReadyFrame ~= frame or not moverEntry or moverEntry.frame ~= frame');
+    assertSourceIncludes('modules/CompanionMicroBags.lua', 'module._microMoverReadyFrame ~= frame or not moverEntry or moverEntry.frame ~= frame');
+
     assertSourceIncludes('core/Movers.lua', 'return true, existing and "replaced" or "registered"');
     assertSourceIncludes('core/Movers.lua', 'stored mover position unavailable');
     assertSourceIncludes('core/Movers.lua', 'if firstDetail then return false, firstDetail end');

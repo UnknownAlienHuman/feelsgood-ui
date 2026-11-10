@@ -558,16 +558,20 @@ local function EnsureFrame(module)
         module._bar = bar
     end
 
-    if not (Movers and type(Movers.Register) == "function" and type(Movers.Apply) == "function") then
-        return nil, "ExperienceBar mover registry unavailable"
-    end
-    local registered, registerDetail = Movers:Register("xpbar", bar, CreateMoverSpec())
-    if registered == false then
-        return nil, "ExperienceBar mover registration failed: " .. tostring(registerDetail)
-    end
-    local applied, applyDetail = Movers:Apply("xpbar", bar)
-    if applied == false then
-        return nil, "ExperienceBar mover apply failed: " .. tostring(applyDetail)
+    local moverEntry = Movers and type(Movers.GetEntry) == "function" and Movers:GetEntry("xpbar") or nil
+    if module._moverReadyFrame ~= bar or not moverEntry or moverEntry.frame ~= bar then
+        if not (Movers and type(Movers.Register) == "function" and type(Movers.Apply) == "function") then
+            return nil, "ExperienceBar mover registry unavailable"
+        end
+        local registered, registerDetail = Movers:Register("xpbar", bar, CreateMoverSpec())
+        if registered == false then
+            return nil, "ExperienceBar mover registration failed: " .. tostring(registerDetail)
+        end
+        local applied, applyDetail = Movers:Apply("xpbar", bar)
+        if applied == false then
+            return nil, "ExperienceBar mover apply failed: " .. tostring(applyDetail)
+        end
+        module._moverReadyFrame = bar
     end
 
     return bar
@@ -795,7 +799,7 @@ function XP:Update()
 
     if not cfg.enabled then
         SetBarVisible(bar, false, false)
-        return
+        return true
     end
 
     bar:SetSize(cfg.width, cfg.height)
@@ -814,7 +818,7 @@ function XP:Update()
     local progress = ResolveProgress(cfg)
     if type(progress) ~= "table" then
         SetBarVisible(bar, false, false)
-        return
+        return true
     end
 
     ApplyModeColor(bar, progress.mode)
@@ -911,7 +915,8 @@ function XP:ApplyConfig()
     ev:RegisterEvent("ENABLE_XP_GAIN")
     ev:RegisterEvent("DISABLE_XP_GAIN")
 
-    self:Update()
+    local updated, updateDetail = self:Update()
+    if updated == false then return false, updateDetail end
     return true
 end
 
