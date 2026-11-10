@@ -26,6 +26,7 @@ jobs:
           python .codex/prepare_experience_event_product_transform.py
           python .codex/harden_experience_event_lifecycle.py
           python .codex/update_experience_event_docs.py
+          python .codex/fix_experience_event_fixture.py
           git diff --check
 
       - name: Audit event-generation contracts
