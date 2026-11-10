@@ -1,0 +1,89 @@
+name: Harden UnitFrames observer atomicity
+
+on:
+  push:
+    branches:
+      - codex/unitframes-observer-atomicity
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Apply observer atomicity hardening
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .codex/fix_unitframes_observer_fixtures.py
+          python .codex/harden_unitframes_observer_atomicity.py
+          git diff --check
+
+      - name: Audit observer ownership contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          target = Path('modules/UnitFramesTarget.lua').read_text()
+          runtime = Path('modules/UnitFramesRuntime.lua').read_text()
+          check = Path('check_lua.js').read_text()
+
+          required = [
+              'local function BuildFrameObserver(frame, unit)',
+              'current.observer ~= observer',
+              'local function RetryOwnerRetiredFrames(ownerRecord)',
+              'Every desired frame is active before replacing ownerRecord fields.',
+              'previous observer cleanup',
+              'local frames = {}',
+          ]
+          for needle in required:
+              assert needle in target, f'missing UnitFrames observer contract: {needle}'
+
+          assert 'observers: ' in runtime
+          assert 'BuildFrameObserver(frame, unit)' in check
+          assert not re.search(r'observer:Register(?:Unit)?Event\(', target)
+          assert 'observer:UnregisterAllEvents()' not in target
+          print('UnitFrames observer ownership audit passed.')
+          PY
+
+      - name: Install Lua 5.1
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v lua5.1 >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y lua5.1
+          fi
+
+      - name: Run UnitFrames observer harness
+        run: lua5.1 .codex/test_unitframes_observer_atomicity.lua
+
+      - name: Validate addon
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm test
+
+      - name: Commit validated product diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .codex
+          rm -f .github/workflows/harden-unitframes-observer-atomicity.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Make UnitFrames observers replacement-atomic" -m "Prepare complete target/focus/targettarget subscriptions before owner publication, roll back failed multi-frame replacement, gate stale callbacks by observer identity, retain failed cleanup for retry, propagate teardown errors, and release FeelsGoodUI 0.0.70."
+          git push origin HEAD:codex/unitframes-observer-atomicity
