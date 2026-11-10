@@ -4,7 +4,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 
 ## Retail 12.1.5 implementation status
 
-- [x] Target Interface `120105` and release `0.0.70`.
+- [x] Target Interface `120105` and release `0.0.71`.
 - [x] Gate Secret/Restricted Values before Lua inspection, conversion, comparison, or formatting.
 - [x] Integrate restricted Unit Frame and Center Bar handling into the canonical render/target owners; remove late method overrides and duplicate producer calls.
 - [x] Keep opaque power/text on exact native sinks where available; otherwise render an explicit unavailable state.
@@ -37,7 +37,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 - [x] Make ActionBars permanent state, EndCaps, SettingsPanel and action-change hooks result-bearing: weak target/method registries prevent duplicates, partial hooks stay inert until full init publishes active owners, init/callback flags publish after success, callback generations make stale handles inert before cleanup, owner replacement is dynamic, and detach releases owners/handles.
 - [x] Make mover registration/apply result-bearing and replacement-safe: duplicate same-frame registration reuses state, frame replacement atomically retires old overlay scripts, same-frame updates and unlock presentation roll back on failure, stale frames cannot apply a key, hot paths retain mover readiness, invalid positions fail explicitly, and all feature families block initialized state until mover ownership succeeds.
 - [x] Make UnitFrames target observer ownership atomic and retryable: prepare every event edge before publication, keep prior frames active across failed replacement, roll back only newly prepared observers, gate stale callbacks by exact observer identity, retain failed unregister cleanup for retry, and propagate observer/watch teardown failures without foreign metadata.
-- [x] Make ExperienceBar native takeover a verified property journal: refuse unreadable channels, read back every write, retain unresolved restore state for retry, reopen hooks on manager replacement, preserve newer conflicts, and propagate exact hook/suppress/restore failures.
+- [x] Make ExperienceBar event/native lifecycle result-bearing: publish callbacks only for the exact active complete generation, clean partial registration before retry, keep failed generations inert, aggregate disable/detach cleanup, roll back first-enable native ownership, preserve the prior committed generation on reapply failure, and retain the verified native property journal.
 
 ## Required in-game validation
 
@@ -55,7 +55,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 - [ ] Start an import that remains combat-deferred, then `/reload` or log out before commit; next startup restores the previous profile and overlays any newer post-import edits, then removes the recovery record.
 - [ ] Hold a long mover drag/resize and verify zero SavedVariables writes, zero apply requests, and zero undo entries before the terminal input event.
 - [ ] Resize/scale ActionBars, UnitFrames, CenterBars, Companion PetBar, and ExperienceBar; each terminal action produces one undo entry and one owner apply.
-- [ ] Give Blizzard status-tracking manager/containers distinctive alpha, mouse and visibility states; inject unreadable alpha/mouse, stubborn setters, hook failure, manager replacement and restore failure; ExperienceBar must never mutate unreadable channels, must report exact failures, retain retryable unresolved records, avoid duplicate hooks/writes, restore exact still-owned values, and preserve newer conflicts without foreign `Hide`/`Show`.
+- [ ] Give Blizzard status-tracking manager/containers distinctive alpha, mouse and visibility states; inject event-frame creation/SetScript/RegisterEvent/UnregisterAllEvents failure plus unreadable alpha/mouse, stubborn setters, hook failure, manager replacement and restore failure; ExperienceBar must publish no partial event generation, keep stale callbacks inert, retry cleanup exactly, never mutate unreadable channels, retain unresolved native records, avoid duplicates, restore exact still-owned values, and preserve newer conflicts without foreign `Hide`/`Show`.
 - [ ] Repeatedly skin and restore Blizzard pet/micro/bag buttons; border frames are reused through `Media` without any `__fguiBorder*` fields on the target buttons, and transparent release is reversed by the next theme/style apply.
 - [ ] Force HookScript, hooksecurefunc, EventRegistry registration, missing pet buttons, and MicroBags layer failures; Companion publishes no false hook flags, retries only missing edges, replacement makes stale callbacks inert, partial layers restore, and the exact failure reaches Lifecycle/Apply.
 - [ ] Give each PetActionButton and PetActionBar distinctive parent/points/size/hit-rect/visibility/alpha/texture/mask/name/cooldown/hotkey state, apply twice, replace one button, make one conflicting external change, then detach; exact still-owned state restores without guessed defaults or overwriting the conflict.
