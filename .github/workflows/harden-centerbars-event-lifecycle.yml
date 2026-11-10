@@ -1,0 +1,89 @@
+name: Harden CenterBars event lifecycle
+
+on:
+  push:
+    branches:
+      - codex/centerbars-event-lifecycle
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Apply event lifecycle hardening
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .codex/harden_centerbars_event_lifecycle.py
+          python .codex/update_centerbars_event_docs.py
+          git diff --check
+
+      - name: Audit event-generation contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          source = Path('modules/CenterBarsRuntime.lua').read_text()
+          check = Path('check_lua.js').read_text()
+
+          required = [
+              'Runtime._nextEventRecordID',
+              'local CENTER_EVENT_REGISTRATIONS = {',
+              'owner._eventRecord ~= record or record.active ~= true',
+              'CenterBars event callback setup failed',
+              'CenterBars previous event cleanup failed',
+              'CenterBars event cleanup failed',
+              'local record, detail = PrepareEventRecord(owner)',
+          ]
+          for needle in required:
+              assert needle in source, f'missing CenterBars event contract: {needle}'
+
+          assert not re.search(r'\bframe:RegisterEvent\(', source)
+          assert not re.search(r'\bframe:RegisterUnitEvent\(', source)
+          assert 'owner._eventFrame:UnregisterAllEvents()' not in source
+          assert 'Runtime._nextEventRecordID' in check
+          print('CenterBars event-generation audit passed.')
+          PY
+
+      - name: Install Lua 5.1
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v lua5.1 >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y lua5.1
+          fi
+
+      - name: Run CenterBars event harness
+        run: lua5.1 .codex/test_centerbars_event_lifecycle.lua
+
+      - name: Validate addon
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm test
+
+      - name: Commit validated product diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .codex
+          rm -f .github/workflows/harden-centerbars-event-lifecycle.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Make CenterBars events generation-owned" -m "Publish only complete exact event records, keep partial and failed-cleanup callbacks inert, retry teardown precisely, aggregate event and native restore failures, and release FeelsGoodUI 0.0.73."
+          git push origin HEAD:codex/centerbars-event-lifecycle
