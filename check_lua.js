@@ -297,6 +297,15 @@ try {
     assertSourceExcludes('modules/CenterBarsRender.lua', /_fguiSuppress(?:Requested|Hooked)/, 'foreign class-resource ownership markers');
 
     assertSourceIncludes('modules/ExperienceBar.lua', 'SuppressBlizzardStatusTracking');
+    assertSourceIncludes('modules/ExperienceBar.lua', 'local EXPERIENCE_EVENTS = {');
+    assertSourceIncludes('modules/ExperienceBar.lua', 'module._eventRecord ~= record or record.active ~= true');
+    assertSourceIncludes('modules/ExperienceBar.lua', 'previous event cleanup failed');
+    assertSourceIncludes('modules/ExperienceBar.lua', 'event rollback: ');
+    assertSourceIncludes('modules/ExperienceBar.lua', 'record.active = false');
+    assertSourceIncludes('modules/ExperienceBar.lua', 'ExperienceBar event callback setup failed');
+    assertSourceExcludes('modules/ExperienceBar.lua', /ev:RegisterEvent\(/, 'unchecked ExperienceBar event registration');
+    assertSourceExcludes('modules/ExperienceBar.lua', /self\._events:UnregisterAllEvents\(/, 'unchecked ExperienceBar event unregister');
+
     assertSourceIncludes('modules/ExperienceBar.lua', 'module._statusTrackingSnapshot');
     assertSourceIncludes('modules/ExperienceBar.lua', 'MaintainStatusTrackingOwnership');
     assertSourceIncludes('modules/ExperienceBar.lua', 'WriteFrameAlpha');

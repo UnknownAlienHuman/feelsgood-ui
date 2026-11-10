@@ -850,29 +850,203 @@ function XP:Update()
     return true
 end
 
-local function EnsureEventFrame(module)
-    if module._events then
-        return module._events
+local EXPERIENCE_EVENTS = {
+    "PLAYER_ENTERING_WORLD",
+    "PLAYER_XP_UPDATE",
+    "PLAYER_MAX_LEVEL_UPDATE",
+    "PLAYER_LEVEL_CHANGED",
+    "PLAYER_LEVEL_UP",
+    "UPDATE_EXHAUSTION",
+    "UPDATE_FACTION",
+    "HONOR_XP_UPDATE",
+    "ENABLE_XP_GAIN",
+    "DISABLE_XP_GAIN",
+}
+
+local function EventFrameCall(frame, method, ...)
+    local fn = frame and frame[method] or nil
+    if type(fn) ~= "function" then
+        return false, tostring(method) .. " is unavailable"
     end
 
-    local ev = CreateFrame("Frame")
-    ev:SetScript("OnEvent", function(_, event, unit)
-        if (event == "PLAYER_XP_UPDATE" or event == "HONOR_XP_UPDATE" or event == "PLAYER_MAX_LEVEL_UPDATE") and unit and unit ~= "player" then
+    local ok, result = pcall(fn, frame, ...)
+    if not ok then
+        return false, tostring(method) .. " failed: " .. tostring(result)
+    end
+    if result == false then
+        return false, tostring(method) .. " rejected the request"
+    end
+    return true
+end
+
+local function ReportExperienceEventFailure(module, event, detail)
+    local message = tostring(event or "event") .. ": " .. tostring(detail or "unknown failure")
+    if module._eventLastError == message then return end
+    module._eventLastError = message
+    if Log and type(Log.Error) == "function" then
+        Log:Error("ExperienceBar event refresh failed: " .. message)
+    end
+end
+
+local function ClearExperienceEventFailure(module)
+    module._eventLastError = nil
+end
+
+local function RunExperienceUpdate(module)
+    if type(module.Update) ~= "function" then
+        return false, "ExperienceBar update owner unavailable"
+    end
+
+    local ok, result, detail = pcall(module.Update, module)
+    if not ok then
+        return false, "ExperienceBar update failed: " .. tostring(result)
+    end
+    if result == false then
+        return false, tostring(detail or "ExperienceBar update failed")
+    end
+    return true
+end
+
+local function EnsureEventFrame(module)
+    local existing = module._eventRecord
+    if type(existing) == "table" and existing.frame then
+        module._events = existing.frame
+        return existing.frame, existing
+    end
+
+    local created, ev = pcall(CreateFrame, "Frame")
+    if not created or not ev then
+        return nil, nil, "ExperienceBar event-frame creation failed: " .. tostring(ev)
+    end
+
+    local record = {
+        frame = ev,
+        active = false,
+        registered = false,
+        cleanupPending = false,
+    }
+
+    local callback = function(_, event, ...)
+        if module._eventRecord ~= record or record.active ~= true then
             return
         end
+
+        local unit = ...
+        if (event == "PLAYER_XP_UPDATE"
+            or event == "HONOR_XP_UPDATE"
+            or event == "PLAYER_MAX_LEVEL_UPDATE")
+            and unit and unit ~= "player" then
+            return
+        end
+
         if module._suppressBlizzardTracking == true then
             local maintained, maintainDetail = MaintainStatusTrackingOwnership(module)
             if maintained == false then
                 ReportStatusTrackingFailure(module, maintainDetail)
+            else
+                ClearStatusTrackingFailure(module)
             end
         end
-        if type(module.Update) == "function" then
-            module:Update()
-        end
-    end)
 
+        local updated, updateDetail = RunExperienceUpdate(module)
+        if updated == false then
+            ReportExperienceEventFailure(module, event, updateDetail)
+        else
+            ClearExperienceEventFailure(module)
+        end
+    end
+
+    local scripted, scriptDetail = EventFrameCall(ev, "SetScript", "OnEvent", callback)
+    if scripted == false then
+        return nil, nil, "ExperienceBar event callback setup failed: " .. tostring(scriptDetail)
+    end
+
+    record.callback = callback
+    module._eventRecord = record
     module._events = ev
-    return ev
+    return ev, record
+end
+
+local function CleanupEventSubscriptions(record)
+    if type(record) ~= "table" then return true end
+
+    record.active = false
+    if record.registered ~= true and record.cleanupPending ~= true then
+        return true
+    end
+
+    local cleaned, detail = EventFrameCall(record.frame, "UnregisterAllEvents")
+    if cleaned == false then
+        record.cleanupPending = true
+        return false, detail
+    end
+
+    record.registered = false
+    record.cleanupPending = false
+    return true
+end
+
+local function PrepareEventSubscriptions(module, record)
+    if type(record) ~= "table" or module._eventRecord ~= record then
+        return false, "ExperienceBar event record unavailable"
+    end
+
+    if record.active == true and record.registered == true and record.cleanupPending ~= true then
+        return true, nil, false
+    end
+
+    if record.registered == true or record.cleanupPending == true then
+        local cleaned, cleanupDetail = CleanupEventSubscriptions(record)
+        if cleaned == false then
+            return false, "previous event cleanup failed: " .. tostring(cleanupDetail)
+        end
+    end
+
+    record.active = false
+    for i = 1, #EXPERIENCE_EVENTS do
+        local event = EXPERIENCE_EVENTS[i]
+        local registered, detail = EventFrameCall(record.frame, "RegisterEvent", event)
+        if registered == false then
+            -- A native registration may have partially succeeded before raising
+            -- or returning false. Treat the frame as dirty until a complete
+            -- UnregisterAllEvents succeeds.
+            record.registered = true
+            record.cleanupPending = true
+            local cleaned, cleanupDetail = CleanupEventSubscriptions(record)
+            local failure = tostring(event) .. ": " .. tostring(detail)
+            if cleaned == false then
+                failure = failure .. "; cleanup: " .. tostring(cleanupDetail)
+            end
+            return false, failure
+        end
+    end
+
+    record.registered = true
+    record.cleanupPending = false
+    return true, nil, true
+end
+
+local function ActivateEventSubscriptions(module, record)
+    if type(record) ~= "table"
+        or module._eventRecord ~= record
+        or record.registered ~= true
+        or record.cleanupPending == true then
+        return false, "ExperienceBar event subscriptions are not ready"
+    end
+    record.active = true
+    return true
+end
+
+local function ReleaseEventSubscriptions(module)
+    local record = module and module._eventRecord or nil
+    if type(record) ~= "table" then return true end
+    record.active = false
+    return CleanupEventSubscriptions(record)
+end
+
+local function JoinFailures(failures)
+    if #failures == 0 then return nil end
+    return table.concat(failures, "; ")
 end
 
 function XP:ApplyConfig()
@@ -882,42 +1056,89 @@ function XP:ApplyConfig()
     local cfg = GetCfg()
     local bar = self._bar
     local ev = self._events
-    if not (bar and ev) then
+    local record = self._eventRecord
+    if not (bar and ev and record) then
         return false, "ExperienceBar runtime owners unavailable"
     end
 
-    ev:UnregisterAllEvents()
     if not cfg.enabled then
+        local failures = {}
+        local released, releaseDetail = ReleaseEventSubscriptions(self)
+        if released == false then
+            failures[#failures + 1] = "events: " .. tostring(releaseDetail)
+        end
+
         self._suppressBlizzardTracking = nil
         local restored, restoreDetail = RestoreBlizzardStatusTracking(self)
-        SetBarVisible(bar, false, true)
         if restored == false then
-            return false, restoreDetail
+            failures[#failures + 1] = "native restore: " .. tostring(restoreDetail)
         end
+
+        SetBarVisible(bar, false, true)
+        local detail = JoinFailures(failures)
+        if detail then return false, detail end
         ClearStatusTrackingFailure(self)
+        ClearExperienceEventFailure(self)
         return true
+    end
+
+    local wasActive = record.active == true
+        and record.registered == true
+        and record.cleanupPending ~= true
+
+    local prepared, prepareDetail = PrepareEventSubscriptions(self, record)
+    if prepared == false then
+        return false, "ExperienceBar event subscription failed: " .. tostring(prepareDetail)
     end
 
     self._suppressBlizzardTracking = true
     local maintained, maintainDetail = MaintainStatusTrackingOwnership(self)
-    if maintained == false then
-        return false, maintainDetail
+    local updated, updateDetail = true, nil
+    if maintained then
+        updated, updateDetail = RunExperienceUpdate(self)
     end
 
-    ev:RegisterEvent("PLAYER_ENTERING_WORLD")
-    ev:RegisterEvent("PLAYER_XP_UPDATE")
-    ev:RegisterEvent("PLAYER_MAX_LEVEL_UPDATE")
-    ev:RegisterEvent("PLAYER_LEVEL_CHANGED")
-    ev:RegisterEvent("PLAYER_LEVEL_UP")
-    ev:RegisterEvent("UPDATE_EXHAUSTION")
-    ev:RegisterEvent("UPDATE_FACTION")
-    ev:RegisterEvent("HONOR_XP_UPDATE")
-    ev:RegisterEvent("ENABLE_XP_GAIN")
-    ev:RegisterEvent("DISABLE_XP_GAIN")
+    if maintained and updated then
+        local activated, activateDetail = ActivateEventSubscriptions(self, record)
+        if activated == false then
+            maintained = false
+            maintainDetail = activateDetail
+        else
+            ClearStatusTrackingFailure(self)
+            ClearExperienceEventFailure(self)
+            return true
+        end
+    end
 
-    local updated, updateDetail = self:Update()
-    if updated == false then return false, updateDetail end
-    return true
+    local failures = {}
+    if maintained == false then
+        failures[#failures + 1] = "native ownership: " .. tostring(maintainDetail)
+    end
+    if updated == false then
+        failures[#failures + 1] = "update: " .. tostring(updateDetail)
+    end
+
+    if not wasActive then
+        record.active = false
+        local released, releaseDetail = CleanupEventSubscriptions(record)
+        if released == false then
+            failures[#failures + 1] = "event rollback: " .. tostring(releaseDetail)
+        end
+
+        self._suppressBlizzardTracking = nil
+        local restored, restoreDetail = RestoreBlizzardStatusTracking(self)
+        if restored == false then
+            failures[#failures + 1] = "native rollback: " .. tostring(restoreDetail)
+        end
+        SetBarVisible(bar, false, true)
+    else
+        -- A reapply failure must not tear down the previously committed event
+        -- owner. The settings/apply journal can restore the prior geometry while
+        -- this exact event generation remains active.
+        record.active = true
+    end
+
+    return false, JoinFailures(failures) or "ExperienceBar apply failed"
 end
 
 function XP:Attach()
@@ -932,18 +1153,26 @@ end
 function XP:Detach()
     self._attached = false
 
-    if self._events and self._events.UnregisterAllEvents then
-        self._events:UnregisterAllEvents()
+    local failures = {}
+    local released, releaseDetail = ReleaseEventSubscriptions(self)
+    if released == false then
+        failures[#failures + 1] = "events: " .. tostring(releaseDetail)
     end
+
     self._suppressBlizzardTracking = nil
     local restored, restoreDetail = RestoreBlizzardStatusTracking(self)
+    if restored == false then
+        failures[#failures + 1] = "native restore: " .. tostring(restoreDetail)
+    end
+
     if self._bar then
         SetBarVisible(self._bar, false, true)
     end
-    if restored == false then
-        return false, restoreDetail
-    end
+
+    local detail = JoinFailures(failures)
+    if detail then return false, detail end
     ClearStatusTrackingFailure(self)
+    ClearExperienceEventFailure(self)
     return true
 end
 
@@ -951,9 +1180,10 @@ function XP:Init()
     if self._inited then return true end
 
     local bar, frameDetail = EnsureFrame(self)
-    local events = EnsureEventFrame(self)
     if not bar then return false, frameDetail end
-    if not events then return false, "ExperienceBar event owner unavailable" end
+
+    local events, _, eventDetail = EnsureEventFrame(self)
+    if not events then return false, eventDetail or "ExperienceBar event owner unavailable" end
 
     self._inited = true
     if Log and Log.Debug then
