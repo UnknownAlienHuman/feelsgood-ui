@@ -34,6 +34,22 @@ local function Call(name, ...)
     return nil
 end
 
+local function CallResult(name, ...)
+    local fn = Ctx()[name]
+    if type(fn) ~= "function" then
+        return false, "CenterBars " .. tostring(name) .. " helper unavailable"
+    end
+
+    local ok, result, detail = pcall(fn, ...)
+    if not ok then
+        return false, "CenterBars " .. tostring(name) .. " failed: " .. tostring(result)
+    end
+    if result == false then
+        return false, tostring(detail or ("CenterBars " .. tostring(name) .. " failed"))
+    end
+    return true, detail
+end
+
 local function GetCenterCfg()
     local value = Call("GetCenterCfg")
     if type(value) == "table" then
@@ -70,23 +86,54 @@ local function GetSharedStatusbarToken()
     return Call("GetSharedStatusbarToken") or "Interface/Buttons/WHITE8x8"
 end
 
+local function RefreshResourceOwner(owner)
+    local refreshed, refreshDetail = CallResult("RefreshResourceMode", owner)
+    if refreshed == false then
+        return false, refreshDetail
+    end
+
+    local updated, updateDetail = CallResult("UpdatePower", owner)
+    if updated == false then
+        return false, updateDetail
+    end
+    return true
+end
+
+local function ReportEventRefreshFailure(owner, event, detail)
+    detail = tostring(detail or "unknown CenterBars event refresh failure")
+    local key = tostring(event) .. ": " .. detail
+    if owner._eventRefreshLastError == key then return end
+    owner._eventRefreshLastError = key
+    if Log and type(Log.Error) == "function" then
+        Log:Error("CenterBars " .. tostring(event) .. " refresh failed: " .. detail)
+    end
+end
+
+local function RefreshResourceOwnerForEvent(owner, event)
+    local ok, detail = RefreshResourceOwner(owner)
+    if ok == false then
+        ReportEventRefreshFailure(owner, event, detail)
+        return false
+    end
+    owner._eventRefreshLastError = nil
+    return true
+end
+
 local CENTER_EVENT_HANDLERS = {
     PLAYER_ENTERING_WORLD = function(owner)
-        Call("RefreshResourceMode", owner)
-        Call("UpdatePower", owner)
+        RefreshResourceOwnerForEvent(owner, "PLAYER_ENTERING_WORLD")
     end,
     PLAYER_SPECIALIZATION_CHANGED = function(owner, unit)
         if unit ~= "player" then return end
-        Call("RefreshResourceMode", owner)
-        Call("UpdatePower", owner)
+        RefreshResourceOwnerForEvent(owner, "PLAYER_SPECIALIZATION_CHANGED")
     end,
     PLAYER_TALENT_UPDATE = function(owner)
-        Call("RefreshResourceMode", owner)
-        Call("UpdatePower", owner)
+        RefreshResourceOwnerForEvent(owner, "PLAYER_TALENT_UPDATE")
     end,
     UNIT_DISPLAYPOWER = function(owner, unit)
         if unit ~= "player" then return end
-        Call("UpdatePower", owner)
+        local ok, detail = CallResult("UpdatePower", owner)
+        if ok == false then ReportEventRefreshFailure(owner, "UNIT_DISPLAYPOWER", detail) end
     end,
     UNIT_POWER_UPDATE = function(owner, unit, powerType)
         Call("OnUnitPower", owner, unit, powerType)
@@ -179,13 +226,16 @@ end
 
 function Runtime:Detach(owner)
     Call("StopRuneTicker", owner)
-    Call("RestoreDefaultClassResources", owner)
+    local restored, restoreDetail = CallResult("RestoreDefaultClassResources", owner)
 
     if owner.frame then
         owner.frame:Hide()
     end
 
     DetachEvents(owner)
+    if restored == false then
+        return false, "CenterBars native restore failed: " .. tostring(restoreDetail)
+    end
     return true
 end
 
@@ -266,11 +316,19 @@ function Runtime:Init(owner)
         return false, "CenterBars mover apply failed: " .. tostring(applyDetail)
     end
 
+    local refreshed, refreshDetail = RefreshResourceOwner(owner)
+    if refreshed == false then
+        Call("StopRuneTicker", owner)
+        local restored, restoreDetail = CallResult("RestoreDefaultClassResources", owner)
+        f:Hide()
+        if restored == false then
+            refreshDetail = tostring(refreshDetail)
+                .. "; rollback restore failed: " .. tostring(restoreDetail)
+        end
+        return false, "CenterBars initialization failed: " .. tostring(refreshDetail)
+    end
+
     owner._inited = true
-
-    Call("RefreshResourceMode", owner)
-    Call("UpdatePower", owner)
-
     Log:Info("CenterBars initialized.")
     return true
 end
@@ -281,10 +339,13 @@ function Runtime:ApplyConfig(owner)
 
     if center.enabled == false then
         Call("StopRuneTicker", owner)
-        Call("RestoreDefaultClassResources", owner)
+        local restored, restoreDetail = CallResult("RestoreDefaultClassResources", owner)
         DetachEvents(owner)
         if owner.frame then
             owner.frame:Hide()
+        end
+        if restored == false then
+            return false, "CenterBars native restore failed: " .. tostring(restoreDetail)
         end
         return true
     end
@@ -347,8 +408,10 @@ function Runtime:ApplyConfig(owner)
     end
 
     owner.frame:Show()
-    Call("RefreshResourceMode", owner)
-    Call("UpdatePower", owner)
+    local refreshed, refreshDetail = RefreshResourceOwner(owner)
+    if refreshed == false then
+        return false, "CenterBars resource refresh failed: " .. tostring(refreshDetail)
+    end
     return true
 end
 

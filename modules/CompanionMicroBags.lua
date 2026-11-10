@@ -46,16 +46,20 @@ local function EnsureMicroAnchor(module)
         module._microAnchor = frame
     end
 
-    if not (Movers and type(Movers.Register) == "function" and type(Movers.Apply) == "function") then
-        return nil, "Companion micro mover registry unavailable"
-    end
-    local registered, registerDetail = Movers:Register(Shared.MICRO_KEY, frame, CreateMicroMenuMoverSpec())
-    if registered == false then
-        return nil, "Companion micro mover registration failed: " .. tostring(registerDetail)
-    end
-    local applied, applyDetail = Movers:Apply(Shared.MICRO_KEY, frame)
-    if applied == false then
-        return nil, "Companion micro mover apply failed: " .. tostring(applyDetail)
+    local moverEntry = Movers and type(Movers.GetEntry) == "function" and Movers:GetEntry(Shared.MICRO_KEY) or nil
+    if module._microMoverReadyFrame ~= frame or not moverEntry or moverEntry.frame ~= frame then
+        if not (Movers and type(Movers.Register) == "function" and type(Movers.Apply) == "function") then
+            return nil, "Companion micro mover registry unavailable"
+        end
+        local registered, registerDetail = Movers:Register(Shared.MICRO_KEY, frame, CreateMicroMenuMoverSpec())
+        if registered == false then
+            return nil, "Companion micro mover registration failed: " .. tostring(registerDetail)
+        end
+        local applied, applyDetail = Movers:Apply(Shared.MICRO_KEY, frame)
+        if applied == false then
+            return nil, "Companion micro mover apply failed: " .. tostring(applyDetail)
+        end
+        module._microMoverReadyFrame = frame
     end
     return frame
 end

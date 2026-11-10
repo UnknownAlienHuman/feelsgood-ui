@@ -100,16 +100,20 @@ local function EnsurePetAnchor(module)
         module._petAnchor = frame
     end
 
-    if not (Movers and type(Movers.Register) == "function" and type(Movers.Apply) == "function") then
-        return nil, "Companion pet mover registry unavailable"
-    end
-    local registered, registerDetail = Movers:Register(Shared.PET_KEY, frame, CreatePetBarMoverSpec())
-    if registered == false then
-        return nil, "Companion pet mover registration failed: " .. tostring(registerDetail)
-    end
-    local applied, applyDetail = Movers:Apply(Shared.PET_KEY, frame)
-    if applied == false then
-        return nil, "Companion pet mover apply failed: " .. tostring(applyDetail)
+    local moverEntry = Movers and type(Movers.GetEntry) == "function" and Movers:GetEntry(Shared.PET_KEY) or nil
+    if module._petMoverReadyFrame ~= frame or not moverEntry or moverEntry.frame ~= frame then
+        if not (Movers and type(Movers.Register) == "function" and type(Movers.Apply) == "function") then
+            return nil, "Companion pet mover registry unavailable"
+        end
+        local registered, registerDetail = Movers:Register(Shared.PET_KEY, frame, CreatePetBarMoverSpec())
+        if registered == false then
+            return nil, "Companion pet mover registration failed: " .. tostring(registerDetail)
+        end
+        local applied, applyDetail = Movers:Apply(Shared.PET_KEY, frame)
+        if applied == false then
+            return nil, "Companion pet mover apply failed: " .. tostring(applyDetail)
+        end
+        module._petMoverReadyFrame = frame
     end
 
     ApplyPetAnchorVisibility(frame)

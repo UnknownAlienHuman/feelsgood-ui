@@ -5,6 +5,7 @@ local _, ns = ...
 local Render = {}
 ns.CenterBarsRender = Render
 
+local Log = ns.Log
 local Media = ns.Media
 local Secret = ns.Secret
 local U = ns.U
@@ -896,62 +897,107 @@ function Render.UpdateRunes(owner)
     end
 end
 
+local CLASS_RESOURCE_MANAGED_ALPHA = 0
+local CLASS_RESOURCE_MANAGED_MOUSE = false
+local CLASS_RESOURCE_ALPHA_EPSILON = 0.0001
+
+local function ClassResourceFrameLabel(name, frame)
+    if type(name) == "string" and name ~= "" then
+        return name
+    end
+    if frame and type(frame.GetName) == "function" then
+        local ok, value = pcall(frame.GetName, frame)
+        if ok and type(value) == "string" and value ~= "" then
+            return value
+        end
+    end
+    return tostring(frame or "unknown class-resource frame")
+end
+
+local function SameClassResourceAlpha(a, b)
+    return type(a) == "number"
+        and type(b) == "number"
+        and math.abs(a - b) <= CLASS_RESOURCE_ALPHA_EPSILON
+end
+
 local function ReadNativeFrameAlpha(frame)
-    if not (frame and type(frame.GetAlpha) == "function") then return nil end
+    if not (frame and type(frame.GetAlpha) == "function") then
+        return false, nil, "GetAlpha is unavailable"
+    end
     local ok, value = pcall(frame.GetAlpha, frame)
-    return ok and type(value) == "number" and value or nil
+    if not ok then
+        return false, nil, "GetAlpha failed: " .. tostring(value)
+    end
+    if type(value) ~= "number" then
+        return false, nil, "GetAlpha returned a non-number"
+    end
+    return true, value
 end
 
 local function ReadNativeFrameMouseEnabled(frame)
-    if not (frame and type(frame.IsMouseEnabled) == "function") then return nil end
+    if not (frame and type(frame.IsMouseEnabled) == "function") then
+        return false, nil, "IsMouseEnabled is unavailable"
+    end
     local ok, value = pcall(frame.IsMouseEnabled, frame)
-    if not ok or type(value) ~= "boolean" then return nil end
-    return value
+    if not ok then
+        return false, nil, "IsMouseEnabled failed: " .. tostring(value)
+    end
+    if type(value) ~= "boolean" then
+        return false, nil, "IsMouseEnabled returned a non-boolean"
+    end
+    return true, value
 end
 
 local function SetNativeFrameAlpha(frame, value)
-    if not (frame and type(frame.SetAlpha) == "function" and type(value) == "number") then
-        return false
+    local readable, current, readDetail = ReadNativeFrameAlpha(frame)
+    if not readable then
+        return false, readDetail
     end
-    if ReadNativeFrameAlpha(frame) == value then return true end
-    return pcall(frame.SetAlpha, frame, value)
+    if SameClassResourceAlpha(current, value) then
+        return true
+    end
+    if type(frame.SetAlpha) ~= "function" then
+        return false, "SetAlpha is unavailable"
+    end
+
+    local ok, detail = pcall(frame.SetAlpha, frame, value)
+    if not ok then
+        return false, "SetAlpha failed: " .. tostring(detail)
+    end
+
+    local verified, actual, verifyDetail = ReadNativeFrameAlpha(frame)
+    if not verified then
+        return false, "SetAlpha could not be verified: " .. tostring(verifyDetail)
+    end
+    if not SameClassResourceAlpha(actual, value) then
+        return false, "SetAlpha did not retain the requested value"
+    end
+    return true
 end
 
 local function SetNativeFrameMouseEnabled(frame, enabled)
-    if not (frame and type(frame.EnableMouse) == "function" and type(enabled) == "boolean") then
-        return false
+    local readable, current, readDetail = ReadNativeFrameMouseEnabled(frame)
+    if not readable then
+        return false, readDetail
     end
-    if ReadNativeFrameMouseEnabled(frame) == enabled then return true end
-    return pcall(frame.EnableMouse, frame, enabled)
-end
-
-local function ApplyClassResourceSuppression(record)
-    local frame = record and record.frame
-    if not frame then return false end
-
-    local applied = false
-    if type(record.alpha) == "number" then
-        SetNativeFrameAlpha(frame, 0)
-        applied = true
+    if current == enabled then
+        return true
     end
-    if type(record.mouseEnabled) == "boolean" then
-        SetNativeFrameMouseEnabled(frame, false)
-        applied = true
+    if type(frame.EnableMouse) ~= "function" then
+        return false, "EnableMouse is unavailable"
     end
-    return applied
-end
 
-local function RestoreClassResourceRecord(record)
-    local frame = record and record.frame
-    if not frame then return false end
-
-    -- Restore only values that still carry our suppression state. A newer
-    -- conflicting owner wins and is never overwritten during detach/disable.
-    if type(record.alpha) == "number" and ReadNativeFrameAlpha(frame) == 0 then
-        SetNativeFrameAlpha(frame, record.alpha)
+    local ok, detail = pcall(frame.EnableMouse, frame, enabled)
+    if not ok then
+        return false, "EnableMouse failed: " .. tostring(detail)
     end
-    if type(record.mouseEnabled) == "boolean" and ReadNativeFrameMouseEnabled(frame) == false then
-        SetNativeFrameMouseEnabled(frame, record.mouseEnabled)
+
+    local verified, actual, verifyDetail = ReadNativeFrameMouseEnabled(frame)
+    if not verified then
+        return false, "EnableMouse could not be verified: " .. tostring(verifyDetail)
+    end
+    if actual ~= enabled then
+        return false, "EnableMouse did not retain the requested value"
     end
     return true
 end
@@ -963,78 +1009,313 @@ local function GetClassResourceRegistry(owner)
     return owner._classResourceSuppression
 end
 
-local function EnsureClassResourceShowHook(owner, frame)
-    if not (owner and frame and type(frame.HookScript) == "function") then
-        return false
-    end
-
-    owner._classResourceSuppressionHooks = type(owner._classResourceSuppressionHooks) == "table"
-        and owner._classResourceSuppressionHooks
-        or {}
-    if owner._classResourceSuppressionHooks[frame] then return true end
-
-    local ok = pcall(frame.HookScript, frame, "OnShow", function(shownFrame)
-        if owner._classResourceSuppressionActive ~= true then return end
-        for _, record in pairs(owner._classResourceSuppression or EMPTY) do
-            if record.frame == shownFrame then
-                ApplyClassResourceSuppression(record)
-                return
+local function GetClassResourceHookRegistry(owner)
+    local registry = owner._classResourceSuppressionHooks
+    local meta = type(registry) == "table" and getmetatable(registry) or nil
+    if type(registry) ~= "table" or type(meta) ~= "table" or meta.__mode ~= "k" then
+        local replacement = setmetatable({}, { __mode = "k" })
+        if type(registry) == "table" then
+            for frame, record in pairs(registry) do
+                if type(record) == "table" then
+                    replacement[frame] = record
+                elseif record == true then
+                    replacement[frame] = { OnShow = true }
+                end
             end
         end
-    end)
-    if ok then
-        owner._classResourceSuppressionHooks[frame] = true
+        registry = replacement
+        owner._classResourceSuppressionHooks = registry
     end
-    return ok
+    return registry
+end
+
+local function AppendClassResourceFailure(failures, label, detail)
+    failures[#failures + 1] = tostring(label) .. ": " .. tostring(detail or "unknown failure")
+end
+
+local function CaptureClassResourceFrame(record)
+    local frame = record and record.frame
+    if not frame then return end
+
+    if record.alphaCaptured ~= true and record.alphaOwned ~= true then
+        local ok, value, detail = ReadNativeFrameAlpha(frame)
+        if ok then
+            record.alpha = value
+            record.alphaCaptured = true
+            record.alphaCaptureDetail = nil
+        else
+            record.alphaCaptureDetail = detail
+        end
+    end
+
+    if record.mouseCaptured ~= true and record.mouseOwned ~= true then
+        local ok, value, detail = ReadNativeFrameMouseEnabled(frame)
+        if ok then
+            record.mouseEnabled = value
+            record.mouseCaptured = true
+            record.mouseCaptureDetail = nil
+        else
+            record.mouseCaptureDetail = detail
+        end
+    end
+end
+
+local function ApplyClassResourceSuppression(record)
+    local frame = record and record.frame
+    if not frame then return false, "frame unavailable" end
+
+    record.releasing = nil
+    CaptureClassResourceFrame(record)
+
+    local failures = {}
+    if record.alphaCaptured ~= true then
+        AppendClassResourceFailure(
+            failures,
+            "alpha",
+            record.alphaCaptureDetail or "original value is unreadable"
+        )
+    else
+        local ok, detail = SetNativeFrameAlpha(frame, CLASS_RESOURCE_MANAGED_ALPHA)
+        if ok then
+            record.alphaOwned = true
+        else
+            AppendClassResourceFailure(failures, "alpha", detail)
+        end
+    end
+
+    if record.mouseCaptured ~= true then
+        AppendClassResourceFailure(
+            failures,
+            "mouse",
+            record.mouseCaptureDetail or "original value is unreadable"
+        )
+    else
+        local ok, detail = SetNativeFrameMouseEnabled(frame, CLASS_RESOURCE_MANAGED_MOUSE)
+        if ok then
+            record.mouseOwned = true
+        else
+            AppendClassResourceFailure(failures, "mouse", detail)
+        end
+    end
+
+    if #failures > 0 then
+        return false, table.concat(failures, "; ")
+    end
+    return true
+end
+
+local function ClassResourceRecordReleased(record)
+    return type(record) ~= "table"
+        or (record.alphaOwned ~= true and record.mouseOwned ~= true)
+end
+
+local function RestoreClassResourceRecord(record)
+    local frame = record and record.frame
+    if not frame then return false, "frame unavailable" end
+
+    record.releasing = true
+    local failures = {}
+
+    if record.alphaOwned == true then
+        local readable, current, detail = ReadNativeFrameAlpha(frame)
+        if not readable then
+            AppendClassResourceFailure(failures, "alpha restore", detail)
+        elseif SameClassResourceAlpha(current, CLASS_RESOURCE_MANAGED_ALPHA) then
+            local restored, restoreDetail = SetNativeFrameAlpha(frame, record.alpha)
+            if restored then
+                record.alphaOwned = nil
+            else
+                AppendClassResourceFailure(failures, "alpha restore", restoreDetail)
+            end
+        else
+            -- A newer owner changed this property. Preserve the conflict and
+            -- release only our ownership claim.
+            record.alphaOwned = nil
+        end
+    end
+
+    if record.mouseOwned == true then
+        local readable, current, detail = ReadNativeFrameMouseEnabled(frame)
+        if not readable then
+            AppendClassResourceFailure(failures, "mouse restore", detail)
+        elseif current == CLASS_RESOURCE_MANAGED_MOUSE then
+            local restored, restoreDetail = SetNativeFrameMouseEnabled(frame, record.mouseEnabled)
+            if restored then
+                record.mouseOwned = nil
+            else
+                AppendClassResourceFailure(failures, "mouse restore", restoreDetail)
+            end
+        else
+            -- Preserve a newer conflicting owner.
+            record.mouseOwned = nil
+        end
+    end
+
+    if #failures > 0 then
+        return false, table.concat(failures, "; ")
+    end
+    return true
+end
+
+local function ReportClassResourceFailure(owner, detail)
+    detail = tostring(detail or "unknown native class-resource failure")
+    if owner._classResourceLastError == detail then return end
+    owner._classResourceLastError = detail
+    if Log and type(Log.Error) == "function" then
+        Log:Error("CenterBars native class-resource ownership failed: " .. detail)
+    end
+end
+
+local function ClearClassResourceFailure(owner)
+    owner._classResourceLastError = nil
+end
+
+local function EnsureClassResourceShowHook(owner, name, frame)
+    if not (owner and frame and type(frame.HookScript) == "function") then
+        return false, ClassResourceFrameLabel(name, frame) .. ": OnShow HookScript unavailable"
+    end
+
+    local registry = GetClassResourceHookRegistry(owner)
+    local hook = registry[frame]
+    if type(hook) ~= "table" then
+        hook = {}
+        registry[frame] = hook
+    end
+    hook.owner = owner
+    hook.name = name
+
+    if type(hook.callback) ~= "function" then
+        hook.callback = function(shownFrame)
+            local currentHook = registry[shownFrame]
+            if not currentHook
+                or currentHook.OnShow ~= true
+                or currentHook.owner ~= owner
+                or owner._classResourceSuppressionActive ~= true then
+                return
+            end
+
+            local records = owner._classResourceSuppression
+            local current = type(records) == "table" and records[currentHook.name] or nil
+            if not current or current.frame ~= shownFrame or current.releasing == true then
+                return
+            end
+
+            local ok, detail = ApplyClassResourceSuppression(current)
+            if ok == false then
+                ReportClassResourceFailure(
+                    owner,
+                    ClassResourceFrameLabel(currentHook.name, shownFrame)
+                        .. ": OnShow suppression failed: " .. tostring(detail)
+                )
+            end
+        end
+    end
+
+    if hook.OnShow == true then return true end
+    local ok, detail = pcall(frame.HookScript, frame, "OnShow", hook.callback)
+    if not ok then
+        return false, ClassResourceFrameLabel(name, frame)
+            .. ": OnShow hook failed: " .. tostring(detail)
+    end
+    hook.OnShow = true
+    return true
 end
 
 local function SuppressClassResourceFrame(owner, name, frame)
     if type(owner) ~= "table" or type(name) ~= "string" or name == "" or not frame then
-        return false
+        return false, "invalid class-resource suppression target"
     end
 
     local registry = GetClassResourceRegistry(owner)
     local record = registry[name]
     if record and record.frame ~= frame then
-        RestoreClassResourceRecord(record)
+        local restored, restoreDetail = RestoreClassResourceRecord(record)
+        if restored == false then
+            return false, ClassResourceFrameLabel(name, record.frame)
+                .. ": previous frame restore failed: " .. tostring(restoreDetail)
+        end
+        if not ClassResourceRecordReleased(record) then
+            return false, ClassResourceFrameLabel(name, record.frame)
+                .. ": previous frame ownership remains unresolved"
+        end
         registry[name] = nil
         record = nil
     end
 
     if not record then
         record = {
+            name = name,
             frame = frame,
-            alpha = ReadNativeFrameAlpha(frame),
-            mouseEnabled = ReadNativeFrameMouseEnabled(frame),
         }
-        if type(record.alpha) ~= "number" and type(record.mouseEnabled) ~= "boolean" then
-            return false
-        end
         registry[name] = record
+    else
+        record.name = name
+        record.releasing = nil
     end
 
-    EnsureClassResourceShowHook(owner, frame)
-    return ApplyClassResourceSuppression(record)
+    local failures = {}
+    local hooked, hookDetail = EnsureClassResourceShowHook(owner, name, frame)
+    if hooked == false then
+        failures[#failures + 1] = tostring(hookDetail)
+    end
+
+    local suppressed, suppressDetail = ApplyClassResourceSuppression(record)
+    if suppressed == false then
+        failures[#failures + 1] = ClassResourceFrameLabel(name, frame)
+            .. ": " .. tostring(suppressDetail)
+    end
+
+    if #failures > 0 then
+        return false, table.concat(failures, "; ")
+    end
+    return true
 end
 
 function Render.RestoreDefaultClassResources(owner)
-    if type(owner) ~= "table" then return false end
+    if type(owner) ~= "table" then
+        return false, "CenterBars class-resource owner unavailable"
+    end
 
     owner._pendingClassResourceSync = nil
     owner._classResourceSuppressionActive = false
 
     local registry = owner._classResourceSuppression
-    if type(registry) ~= "table" then return true end
-
-    for name, record in pairs(registry) do
-        RestoreClassResourceRecord(record)
-        registry[name] = nil
+    if type(registry) ~= "table" then
+        ClearClassResourceFailure(owner)
+        return true
     end
+
+    local failures = {}
+    for name, record in pairs(registry) do
+        local restored, detail = RestoreClassResourceRecord(record)
+        if restored == false then
+            AppendClassResourceFailure(
+                failures,
+                ClassResourceFrameLabel(name, record and record.frame),
+                detail
+            )
+        elseif ClassResourceRecordReleased(record) then
+            registry[name] = nil
+        end
+    end
+
+    if next(registry) == nil then
+        owner._classResourceSuppression = nil
+    end
+    if #failures > 0 then
+        local detail = table.concat(failures, "; ")
+        ReportClassResourceFailure(owner, detail)
+        return false, detail
+    end
+
+    ClearClassResourceFailure(owner)
     return true
 end
 
 function Render.SyncDefaultClassResources(owner)
-    if type(owner) ~= "table" then return false end
+    if type(owner) ~= "table" then
+        return false, "CenterBars class-resource owner unavailable"
+    end
 
     local center = GetCenterCfg()
     local hideNames = owner._hideFrames
@@ -1044,7 +1325,7 @@ function Render.SyncDefaultClassResources(owner)
 
     if _G.InCombatLockdown and InCombatLockdown() then
         owner._pendingClassResourceSync = true
-        return true
+        return true, "CenterBars class-resource sync deferred in combat"
     end
 
     owner._pendingClassResourceSync = nil
@@ -1055,6 +1336,7 @@ function Render.SyncDefaultClassResources(owner)
     owner._classResourceSuppressionActive = true
     local registry = GetClassResourceRegistry(owner)
     local activeNames = {}
+    local failures = {}
 
     for i = 1, #hideNames do
         local name = hideNames[i]
@@ -1062,35 +1344,67 @@ function Render.SyncDefaultClassResources(owner)
             activeNames[name] = true
             local frame = _G[name]
             if frame then
-                SuppressClassResourceFrame(owner, name, frame)
+                local suppressed, detail = SuppressClassResourceFrame(owner, name, frame)
+                if suppressed == false then
+                    AppendClassResourceFailure(failures, name, detail)
+                end
             elseif registry[name] then
-                RestoreClassResourceRecord(registry[name])
-                registry[name] = nil
+                local record = registry[name]
+                local restored, detail = RestoreClassResourceRecord(record)
+                if restored == false then
+                    AppendClassResourceFailure(failures, name, detail)
+                elseif ClassResourceRecordReleased(record) then
+                    registry[name] = nil
+                end
             end
         end
     end
 
     for name, record in pairs(registry) do
         if not activeNames[name] then
-            RestoreClassResourceRecord(record)
-            registry[name] = nil
+            local restored, detail = RestoreClassResourceRecord(record)
+            if restored == false then
+                AppendClassResourceFailure(failures, name, detail)
+            elseif ClassResourceRecordReleased(record) then
+                registry[name] = nil
+            end
         end
+    end
+
+    if next(registry) == nil then
+        owner._classResourceSuppression = nil
+    end
+    if #failures > 0 then
+        return false, table.concat(failures, "; ")
     end
     return true
 end
 
+local function SyncAndReportClassResources(owner)
+    local ok, detail = Render.SyncDefaultClassResources(owner)
+    if ok == false then
+        ReportClassResourceFailure(owner, detail)
+        return false, detail
+    end
+    ClearClassResourceFailure(owner)
+    return true, detail
+end
+
 function Render.HideDefaultClassResources(owner)
-    return Render.SyncDefaultClassResources(owner)
+    return SyncAndReportClassResources(owner)
 end
 
 function Render.OnCombatEnd(owner)
     if owner._pendingClassResourceSync then
-        Render.SyncDefaultClassResources(owner)
+        return SyncAndReportClassResources(owner)
     end
+    return true
 end
 
 function Render.RefreshResourceMode(owner)
-    if not owner.frame then return end
+    if not owner.frame then
+        return false, "CenterBars frame unavailable"
+    end
 
     local _, class = UnitClass("player")
     if not CanInspect(class) then
@@ -1169,8 +1483,7 @@ function Render.RefreshResourceMode(owner)
             owner.powerBar:SetPoint("TOP", owner.frame, "TOP", 0, 0)
         end
         owner.frame:SetSize(w, h2)
-        Render.SyncDefaultClassResources(owner)
-        return
+        return SyncAndReportClassResources(owner)
     end
 
     if owner.resourceBar then owner.resourceBar:Show() end
@@ -1186,7 +1499,7 @@ function Render.RefreshResourceMode(owner)
         Render.UpdatePointResource(owner)
     end
 
-    Render.SyncDefaultClassResources(owner)
+    return SyncAndReportClassResources(owner)
 end
 
 function Render.OnUnitPower(owner, unit)
