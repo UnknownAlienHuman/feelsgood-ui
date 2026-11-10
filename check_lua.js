@@ -258,7 +258,21 @@ try {
     assertSourceIncludes('modules/CompanionMicroBags.lua', 'GetWeakHookRegistry');
     assertSourceIncludes('modules/CompanionMicroBags.lua', 'record.active = false');
     assertSourceIncludes('modules/CompanionMicroBags.lua', 'StyleBackpackButton(button, cp.buttonSize or 32, true)');
-    assertSourceIncludes('modules/CompanionRuntime.lua', 'local callbackReady, callbackDetail = EnsureExpandChangedCallback(module)');
+    assertSourceIncludes('modules/CompanionRuntime.lua', 'Runtime._nextExpandRecordID');
+    assertSourceIncludes('modules/CompanionRuntime.lua', 'module._expandCallbackRecord ~= record');
+    assertSourceIncludes('modules/CompanionRuntime.lua', 'local function PrepareWatcherRecord(module, events, mode)');
+    assertSourceIncludes('modules/CompanionRuntime.lua', 'local function InstallDetachRetryWatcher(module)');
+    assertSourceIncludes('modules/CompanionRuntime.lua', 'Keep the dedicated detach watcher active');
+    assertSourceIncludes('modules/CompanionRuntime.lua', 'replacement watcher: ');
+    assertSourceIncludes('modules/CompanionRuntime.lua', 'module._watcherRecord ~= record or record.active ~= true');
+    assertSourceIncludes('modules/CompanionRuntime.lua', 'callback unregister failed');
+    assertSourceIncludes('modules/CompanionRuntime.lua', 'Companion restore deferred until combat ends');
+    assertSourceIncludes('modules/CompanionRuntime.lua', 'local expandRecord, expandDetail = PrepareExpandRecord(module)');
+    assertSourceIncludes('modules/CompanionRuntime.lua', 'local watcherRecord, watcherDetail = PrepareWatcherRecord');
+    assertSourceExcludes('modules/CompanionRuntime.lua', /module\._callbackHandles:Unregister\(\)/, 'unchecked Companion callback unregister');
+    assertSourceExcludes('modules/CompanionRuntime.lua', /watcher:RegisterEvent\(/, 'unchecked Companion watcher registration');
+    assertSourceExcludes('modules/CompanionRuntime.lua', /watcher:UnregisterAllEvents\(\)/, 'unchecked Companion watcher unregister');
+
     assertSourceExcludes('modules/CompanionMicroBags.lua', /hooks\[[^\]]+\]\s*=\s*true/, 'preemptive Companion source hook publication');
     assertSourceExcludes('modules/CompanionMicroBags.lua', /bagHooks\[[^\]]+\]\s*=\s*true/, 'preemptive Companion bag hook publication');
     assertSourceExcludes('modules/CompanionMicroBags.lua', /_microResetHooked/, 'single-object Companion reset hook flag');
