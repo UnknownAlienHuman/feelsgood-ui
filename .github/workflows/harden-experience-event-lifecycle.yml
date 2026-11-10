@@ -23,6 +23,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python .codex/fix_experience_event_transform_anchors.py
           python .codex/harden_experience_event_lifecycle.py
           git diff --check
 
