@@ -4,7 +4,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 
 ## Retail 12.1.5 implementation status
 
-- [x] Target Interface `120105` and release `0.0.69`.
+- [x] Target Interface `120105` and release `0.0.70`.
 - [x] Gate Secret/Restricted Values before Lua inspection, conversion, comparison, or formatting.
 - [x] Integrate restricted Unit Frame and Center Bar handling into the canonical render/target owners; remove late method overrides and duplicate producer calls.
 - [x] Keep opaque power/text on exact native sinks where available; otherwise render an explicit unavailable state.
@@ -36,7 +36,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 - [x] Make ActionBars holder/button auto-hide and state-layer hooks result-bearing: weak registries own state, callbacks resolve current owners, partial failures retry only missing edges, and visual/apply callers propagate failure.
 - [x] Make ActionBars permanent state, EndCaps, SettingsPanel and action-change hooks result-bearing: weak target/method registries prevent duplicates, partial hooks stay inert until full init publishes active owners, init/callback flags publish after success, callback generations make stale handles inert before cleanup, owner replacement is dynamic, and detach releases owners/handles.
 - [x] Make mover registration/apply result-bearing and replacement-safe: duplicate same-frame registration reuses state, frame replacement atomically retires old overlay scripts, same-frame updates and unlock presentation roll back on failure, stale frames cannot apply a key, hot paths retain mover readiness, invalid positions fail explicitly, and all feature families block initialized state until mover ownership succeeds.
-- [x] Move UnitFrames target observers, aura roles, header-hook state, low-health cache and unit-watch ownership off oUF frames/elements into weak registries; remove target-aura runtime persistence writes and propagate native watch failures.
+- [x] Make UnitFrames target observer ownership atomic and retryable: prepare every event edge before publication, keep prior frames active across failed replacement, roll back only newly prepared observers, gate stale callbacks by exact observer identity, retain failed unregister cleanup for retry, and propagate observer/watch teardown failures without foreign metadata.
 - [x] Make ExperienceBar native takeover a verified property journal: refuse unreadable channels, read back every write, retain unresolved restore state for retry, reopen hooks on manager replacement, preserve newer conflicts, and propagate exact hook/suppress/restore failures.
 
 ## Required in-game validation
@@ -67,7 +67,7 @@ Updated: 2026-11-06. Completed historical execution notes live in `history.md`; 
 - [ ] Simulate a feature attach/apply failure; the module remains disabled, any new attachment is cleaned up, later feature families still enable, and the exact failure is logged.
 - [ ] Player/target/focus/targettarget frames handle ordinary and restricted health/name/classification values without formatting errors or opaque readback.
 - [ ] Remove a UnitFrames section/size/scale field in a test profile after DB initialization, then create/apply frames; runtime must use defaults without recreating or mutating the missing persisted field, while the next explicit DB/schema normalization repairs it.
-- [ ] Target aura filtering handles ordinary and inaccessible aura-source payloads without indexing denied tables or fields; aura containers and oUF frames receive no `_fgui*` metadata, repeated attach installs no duplicate hooks/observers, and detach makes permanent header hooks inert.
+- [ ] Target aura filtering handles ordinary and inaccessible aura-source payloads without indexing denied tables or fields; inject CreateFrame/SetScript/RegisterEvent/RegisterUnitEvent/UnregisterAllEvents and partial header-hook failures during target/focus/targettarget replacement; prior observers remain active until full prepare, failed new observers are inert, cleanup retries exactly, repeated attach stays single, and no aura container/oUF frame receives `_fgui*` metadata.
 - [ ] Force `RegisterUnitWatch` and `UnregisterUnitWatch` failures for focus/targettarget/pet; no false registry state is published, Apply/Lifecycle receives the exact failure, successful retry is idempotent, and detach clears every successfully owned watch.
 - [ ] Center bars handle ordinary and restricted power/rune values without duplicate producer calls, error loops, retained opaque samples, or stale text.
 - [ ] Across DK/Rogue/Druid/Paladin/Monk/Warlock/Mage/Evoker, give native class-resource frames distinctive alpha/mouse/visibility states; inject unreadable channels, stubborn setters, HookScript failure, restore failure, OnShow, named-frame replacement and combat toggle; verify exact failure reaches Apply/Lifecycle, unresolved restore retries, zero addon Hide/Show/Setup calls, exact still-owned restore, and preservation of newer conflicts.
