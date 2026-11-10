@@ -268,6 +268,16 @@ try {
     assertSourceIncludes('modules/CenterBarsRender.lua', 'EnsureClassResourceShowHook');
     assertSourceIncludes('modules/CenterBarsRender.lua', 'RestoreClassResourceRecord');
     assertSourceIncludes('modules/CenterBarsRender.lua', 'ApplyClassResourceSuppression(record)');
+    assertSourceIncludes('modules/CenterBarsRender.lua', 'SetAlpha did not retain the requested value');
+    assertSourceIncludes('modules/CenterBarsRender.lua', 'EnableMouse did not retain the requested value');
+    assertSourceIncludes('modules/CenterBarsRender.lua', 'record.alphaOwned = true');
+    assertSourceIncludes('modules/CenterBarsRender.lua', 'record.mouseOwned = true');
+    assertSourceIncludes('modules/CenterBarsRender.lua', 'previous frame restore failed');
+    assertSourceIncludes('modules/CenterBarsRender.lua', 'owner._classResourceSuppression = nil');
+    assertSourceIncludes('modules/CenterBarsRuntime.lua', 'CenterBars native restore failed');
+    assertSourceIncludes('modules/CenterBarsRuntime.lua', 'CenterBars initialization failed');
+    assertSourceIncludes('core/FeatureRegistry.lua', 'center = { feature = "center", deferInCombat = true }');
+
     assertSourceIncludes('modules/CenterBarsRender.lua', 'elseif registry[name] then');
     assertSourceExcludes('modules/CenterBarsRender.lua', /pcall\(frame\.Hide,\s*frame\)/, 'native class-resource Hide takeover');
     assertSourceExcludes('modules/CenterBarsRender.lua', /pcall\(frame\.Show,\s*frame\)/, 'native class-resource Show restore');

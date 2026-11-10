@@ -127,7 +127,7 @@ local APPLY_CONTRACTS = Registry.APPLY_CONTRACTS or {
         feature = "unitframes",
         deferInCombat = true,
     },
-    center = { feature = "center" },
+    center = { feature = "center", deferInCombat = true },
     experience = { feature = "experience" },
     actionbars = {
         feature = "actionbars",
