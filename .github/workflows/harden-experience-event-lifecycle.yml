@@ -1,0 +1,86 @@
+name: Harden ExperienceBar event lifecycle
+
+on:
+  push:
+    branches:
+      - codex/experience-event-lifecycle
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Apply event lifecycle hardening
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .codex/harden_experience_event_lifecycle.py
+          git diff --check
+
+      - name: Audit event-generation contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          source = Path('modules/ExperienceBar.lua').read_text()
+          check = Path('check_lua.js').read_text()
+
+          required = [
+              'local EXPERIENCE_EVENTS = {',
+              'module._eventRecord ~= record or record.active ~= true',
+              'previous event cleanup failed',
+              'event rollback: ',
+              'ExperienceBar event callback setup failed',
+              'A reapply failure must not tear down the previously committed event',
+          ]
+          for needle in required:
+              assert needle in source, f'missing ExperienceBar event contract: {needle}'
+
+          assert not re.search(r'\bev:RegisterEvent\(', source)
+          assert 'self._events:UnregisterAllEvents()' not in source
+          assert 'local EXPERIENCE_EVENTS = {' in check
+          print('ExperienceBar event lifecycle audit passed.')
+          PY
+
+      - name: Install Lua 5.1
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v lua5.1 >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y lua5.1
+          fi
+
+      - name: Run ExperienceBar event harness
+        run: lua5.1 .codex/test_experience_event_lifecycle.lua
+
+      - name: Validate addon
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm test
+
+      - name: Commit validated product diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .codex
+          rm -f .github/workflows/harden-experience-event-lifecycle.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Make ExperienceBar event lifecycle result-bearing" -m "Publish only complete active event generations, keep partial and failed-cleanup callbacks inert, retry exact cleanup, roll back first-enable native ownership, preserve committed subscriptions on reapply failure, aggregate detach errors, and release FeelsGoodUI 0.0.71."
+          git push origin HEAD:codex/experience-event-lifecycle
