@@ -3,7 +3,7 @@ name: Refine mover registration atomicity
 on:
   push:
     branches:
-      - codex/movers-registration-lifecycle
+      - codex/lifecycle-ownership-hardening
 
 permissions:
   contents: write
@@ -23,6 +23,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python .codex/fix_atomicity_readme_anchor.py
           python .codex/refine_movers_registration_atomicity.py
           python .codex/fix_mover_replacement_refresh.py
           python .codex/fix_mover_readiness_ownership.py
@@ -80,7 +81,7 @@ jobs:
           npm ci
           npm test
 
-      - name: Commit validated refinement
+      - name: Commit validated refinement and remove staging artifacts
         shell: bash
         run: |
           set -euo pipefail
@@ -89,5 +90,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "Make mover replacement atomic" -m "Roll back same-frame descriptor updates and unlock presentation on failure, reject stale frame apply, prepare replacements before retiring prior owners, and retain frame-specific mover readiness in hot paths."
-          git push origin HEAD:codex/movers-registration-lifecycle
+          git commit -m "Complete mover replacement atomicity" -m "Roll back same-frame descriptor and unlock-presentation failures, reject stale frame apply, prepare replacements before retiring prior owners, retain frame-specific readiness in hot paths, and remove leaked validation staging artifacts."
+          git push origin HEAD:codex/lifecycle-ownership-hardening
