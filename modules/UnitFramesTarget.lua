@@ -641,10 +641,20 @@ local function HookTargetHeaderSignal(frame, element)
         hook.hideHooked = true
     end
 
-    -- Publish the target frame only after every mandatory permanent edge is
-    -- installed. A partial hook remains inert and retryable.
-    hook.frame = frame
     return true
+end
+
+local function PublishTargetHeaderSignal(frame, element)
+    local hook = element and HeaderHookRegistry[element] or nil
+    if type(hook) == "table" and hook.showHooked == true and hook.hideHooked == true then
+        hook.frame = frame
+    end
+end
+
+local function PublishTargetHeaderAnchorSignals(frame)
+    if type(frame) ~= "table" or not frame.TargetHeader then return end
+    PublishTargetHeaderSignal(frame, frame.Buffs)
+    PublishTargetHeaderSignal(frame, frame.Debuffs)
 end
 
 local function HookTargetHeaderAnchorSignals(frame)
@@ -837,7 +847,10 @@ local function AttachFrameSignals(frame, owner)
 
     local unit = frame.unit
     if unit ~= "target" and unit ~= "focus" and unit ~= "targettarget" then
-        return true, nil, false, true
+        return false,
+            "UnitFrames observer frame unit is unavailable or unsupported: " .. tostring(unit),
+            false,
+            false
     end
 
     local hooked, hookDetail = HookTargetHeaderAnchorSignals(frame)
@@ -852,6 +865,7 @@ local function AttachFrameSignals(frame, owner)
         if record.owner ~= owner or record.unit ~= unit or not record.observer then
             return false, "UnitFrames observer frame already has a different active owner", false, false
         end
+        PublishTargetHeaderAnchorSignals(frame)
         if cleanupOK == false then
             return false, cleanupDetail, false, true
         end
@@ -869,6 +883,7 @@ local function AttachFrameSignals(frame, owner)
     record.owner = owner
     record.unit = unit
     record.active = true
+    PublishTargetHeaderAnchorSignals(frame)
 
     local failures = {}
     if cleanupOK == false then failures[#failures + 1] = tostring(cleanupDetail) end
@@ -977,6 +992,14 @@ function Target.AttachOwner(owner)
             activated[#activated + 1] = desired[field]
         end
         if ready ~= true then
+            local failedFrame = desired[field]
+            local failedRecord = failedFrame and FrameRegistry[failedFrame] or nil
+            if failedRecord
+                and type(failedRecord.retiredObservers) == "table"
+                and #failedRecord.retiredObservers > 0 then
+                MarkRetiredFrame(ownerRecord, failedFrame)
+            end
+
             local rollbackOK, rollbackDetail = RollbackActivatedFrames(ownerRecord, activated)
             local failure = tostring(field) .. ": " .. tostring(detail)
             if rollbackOK == false then

@@ -159,6 +159,9 @@ try {
 
     assertSourceIncludes('modules/UnitFramesTarget.lua', 'Target._frameRegistry');
     assertSourceIncludes('modules/UnitFramesTarget.lua', 'local function BuildFrameObserver(frame, unit)');
+    assertSourceIncludes('modules/UnitFramesTarget.lua', 'local function PublishTargetHeaderAnchorSignals(frame)');
+    assertSourceIncludes('modules/UnitFramesTarget.lua', 'UnitFrames observer frame unit is unavailable or unsupported');
+    assertSourceIncludes('modules/UnitFramesTarget.lua', 'MarkRetiredFrame(ownerRecord, failedFrame)');
     assertSourceIncludes('modules/UnitFramesTarget.lua', 'current.observer ~= observer');
     assertSourceIncludes('modules/UnitFramesTarget.lua', 'local function RetryOwnerRetiredFrames(ownerRecord)');
     assertSourceIncludes('modules/UnitFramesTarget.lua', 'Every desired frame is active before replacing ownerRecord fields.');
