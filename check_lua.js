@@ -302,6 +302,16 @@ try {
     assertSourceIncludes('modules/CenterBarsRender.lua', 'owner._classResourceSuppression = nil');
     assertSourceIncludes('modules/CenterBarsRuntime.lua', 'CenterBars native restore failed');
     assertSourceIncludes('modules/CenterBarsRuntime.lua', 'CenterBars initialization failed');
+    assertSourceIncludes('modules/CenterBarsRuntime.lua', 'Runtime._nextEventRecordID');
+    assertSourceIncludes('modules/CenterBarsRuntime.lua', 'local CENTER_EVENT_REGISTRATIONS = {');
+    assertSourceIncludes('modules/CenterBarsRuntime.lua', 'owner._eventRecord ~= record or record.active ~= true');
+    assertSourceIncludes('modules/CenterBarsRuntime.lua', 'CenterBars event callback setup failed');
+    assertSourceIncludes('modules/CenterBarsRuntime.lua', 'CenterBars previous event cleanup failed');
+    assertSourceIncludes('modules/CenterBarsRuntime.lua', 'CenterBars event cleanup failed');
+    assertSourceExcludes('modules/CenterBarsRuntime.lua', /frame:RegisterEvent\(/, 'unchecked CenterBars event registration');
+    assertSourceExcludes('modules/CenterBarsRuntime.lua', /frame:RegisterUnitEvent\(/, 'unchecked CenterBars unit-event registration');
+    assertSourceExcludes('modules/CenterBarsRuntime.lua', /owner\._eventFrame:UnregisterAllEvents\(\)/, 'unchecked CenterBars event unregister');
+
     assertSourceIncludes('core/FeatureRegistry.lua', 'center = { feature = "center", deferInCombat = true }');
 
     assertSourceIncludes('modules/CenterBarsRender.lua', 'elseif registry[name] then');

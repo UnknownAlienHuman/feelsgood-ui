@@ -22,7 +22,7 @@
 | `modules/ActionBarsBlizzardShell.lua` | Reversible Blizzard shell/native-toggle takeover, weak target/method Settings/EndCaps hook ownership, per-character recovery across reload/interruption, exact detach restore, and managed-position synchronization. |
 | `modules/ActionBars.lua`, `modules/ActionBarsRuntime.lua`, `modules/ActionBarsEditMode.lua` | Secure holders, result-bearing global-hook/callback initialization and detach cleanup, event/lifecycle coordination, and mover integration without direct profile mutation. |
 | `modules/ActionBarsState.lua`, `modules/ActionBarsVisuals.lua` | Weak-key ActionButton/holder/region runtime registries, result-bearing custom state-layer and auto-hide hook ownership, typography/cooldown caches, empty-slot and hotkey presentation. |
-| `modules/CenterBars*.lua` | Center-resource rendering/runtime plus verified, retryable and conflict-aware Blizzard class-resource alpha/mouse property ownership. |
+| `modules/CenterBars*.lua` | Center-resource rendering/runtime with result-bearing event generations plus verified, retryable and conflict-aware Blizzard class-resource alpha/mouse property ownership. |
 | `modules/CompanionRuntime.lua` | Result-bearing Companion lifecycle/apply coordinator with prepare/commit EventRegistry and watcher generations, retryable teardown, deferred-detach finalization, and partial-layer cleanup. |
 | `modules/CompanionPetState.lua` | Exact original/managed PetActionButton and native PetActionBar snapshot journal with conflict-aware restore. |
 | `modules/CompanionMicroBags.lua`, `modules/CompanionPetBar.lua`, `modules/CompanionShared.lua` | Weak-key replacement-aware permanent-hook ownership, owner-local cache state, and pet-bar, micro-menu, and bag presentation layers. |
