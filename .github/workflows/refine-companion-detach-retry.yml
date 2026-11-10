@@ -24,6 +24,7 @@ jobs:
         run: |
           set -euo pipefail
           python .codex/refine_companion_detach_retry.py
+          python .codex/fix_companion_detach_retry_fixture.py
           git diff --check
 
       - name: Audit retry-owner contracts
