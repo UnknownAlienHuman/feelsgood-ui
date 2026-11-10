@@ -27,5 +27,12 @@ if count != 1:
     raise RuntimeError(f'Companion debounce assertion anchor: expected one, found {count}')
 text = text.replace(old_assert, new_assert, 1)
 
+old_attach = 'assertEqual(module._eventsAttached, nil, "failed attach publishes no events")\n'
+new_attach = 'assertEqual(module._eventsAttached, false, "failed attach remains explicitly unattached")\n'
+count = text.count(old_attach)
+if count != 1:
+    raise RuntimeError(f'Companion failed-attach assertion anchor: expected one, found {count}')
+text = text.replace(old_attach, new_attach, 1)
+
 path.write_text(text, encoding='utf-8')
-print('Tightened Companion runtime harness isolation and debounce assertion.')
+print('Tightened Companion runtime harness isolation and failed-attach assertions.')
