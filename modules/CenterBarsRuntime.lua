@@ -13,6 +13,7 @@ local Safety = ns.Safety
 local EMPTY = {}
 
 Runtime._ctx = Runtime._ctx or EMPTY
+Runtime._nextEventRecordID = Runtime._nextEventRecordID or 0
 
 function Runtime:Configure(context)
     if type(context) == "table" then
@@ -152,62 +153,243 @@ local CENTER_EVENT_HANDLERS = {
     end,
 }
 
-local function EnsureEvents(owner)
-    if owner._eventsAttached then
+local CENTER_EVENT_REGISTRATIONS = {
+    { event = "PLAYER_ENTERING_WORLD" },
+    { event = "PLAYER_SPECIALIZATION_CHANGED" },
+    { event = "PLAYER_TALENT_UPDATE" },
+    { event = "UNIT_DISPLAYPOWER", unit = "player" },
+    { event = "UNIT_POWER_UPDATE", unit = "player" },
+    { event = "UNIT_POWER_FREQUENT", unit = "player" },
+    { event = "UNIT_MAXPOWER", unit = "player" },
+    { event = "RUNE_POWER_UPDATE" },
+    { event = "RUNE_TYPE_UPDATE" },
+}
+
+local function EventFrameCall(frame, method, ...)
+    local fn = frame and frame[method] or nil
+    if type(fn) ~= "function" then
+        return false, tostring(method) .. " is unavailable"
+    end
+
+    local ok, result = pcall(fn, frame, ...)
+    if not ok then
+        return false, tostring(method) .. " failed: " .. tostring(result)
+    end
+    if result == false then
+        return false, tostring(method) .. " rejected the request"
+    end
+    return true
+end
+
+local function GetRetiredEventRecords(owner)
+    local records = owner._retiredEventRecords
+    if type(records) ~= "table" then
+        records = {}
+        owner._retiredEventRecords = records
+    end
+    return records
+end
+
+local function AddRetiredEventRecord(owner, record)
+    if type(record) ~= "table" then return end
+    local records = GetRetiredEventRecords(owner)
+    for i = 1, #records do
+        if records[i] == record then return end
+    end
+    records[#records + 1] = record
+end
+
+local function CleanupEventRecord(record)
+    if type(record) ~= "table" then return true end
+    record.active = false
+
+    local failures = {}
+    local scriptOK, scriptDetail = EventFrameCall(record.frame, "SetScript", "OnEvent", nil)
+    if not scriptOK then failures[#failures + 1] = tostring(scriptDetail) end
+
+    local eventsOK, eventsDetail = EventFrameCall(record.frame, "UnregisterAllEvents")
+    if not eventsOK then failures[#failures + 1] = tostring(eventsDetail) end
+
+    if #failures > 0 then
+        record.cleanupPending = true
+        return false, table.concat(failures, "; ")
+    end
+
+    record.registered = false
+    record.cleanupPending = false
+    return true
+end
+
+local function RetryRetiredEventRecords(owner)
+    local records = owner._retiredEventRecords
+    if type(records) ~= "table" or #records == 0 then return true end
+
+    local failures = {}
+    for i = #records, 1, -1 do
+        local record = records[i]
+        local ok, detail = CleanupEventRecord(record)
+        if ok then
+            table.remove(records, i)
+        else
+            failures[#failures + 1] = tostring(detail)
+        end
+    end
+    if #records == 0 then owner._retiredEventRecords = nil end
+    if #failures > 0 then return false, table.concat(failures, "; ") end
+    return true
+end
+
+local function RegisterEventEdge(frame, registration)
+    if registration.unit ~= nil and type(frame.RegisterUnitEvent) == "function" then
+        local ok, detail = EventFrameCall(
+            frame,
+            "RegisterUnitEvent",
+            registration.event,
+            registration.unit
+        )
+        if ok == false then
+            return false, registration.event .. " (" .. tostring(registration.unit) .. "): " .. tostring(detail)
+        end
         return true
     end
 
-    local frame = owner._eventFrame
-    if not frame then
-        frame = CreateFrame("Frame")
-        owner._eventFrame = frame
+    local ok, detail = EventFrameCall(frame, "RegisterEvent", registration.event)
+    if ok == false then
+        return false, registration.event .. ": " .. tostring(detail)
+    end
+    return true
+end
+
+local function PrepareEventRecord(owner)
+    local created, frame = pcall(CreateFrame, "Frame")
+    if not created or not frame then
+        return nil, "CenterBars event-frame creation failed: " .. tostring(frame)
     end
 
-    frame:SetScript("OnEvent", function(_, event, ...)
+    Runtime._nextEventRecordID = Runtime._nextEventRecordID + 1
+    local record = {
+        id = Runtime._nextEventRecordID,
+        frame = frame,
+        active = false,
+        registered = false,
+        cleanupPending = false,
+    }
+
+    record.callback = function(_, event, ...)
+        if owner._eventRecord ~= record or record.active ~= true then
+            return
+        end
+
         local handler = CENTER_EVENT_HANDLERS[event]
         if not handler then return end
-        if Safety and Safety.Dispatch then
+        if Safety and type(Safety.Dispatch) == "function" then
             Safety.Dispatch(owner, event, handler, ...)
         else
-            handler(owner, ...)
+            local ok, detail = pcall(handler, owner, ...)
+            if not ok then
+                ReportEventRefreshFailure(owner, event, detail)
+            end
         end
-    end)
-
-    frame:RegisterEvent("PLAYER_ENTERING_WORLD")
-    frame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
-    frame:RegisterEvent("PLAYER_TALENT_UPDATE")
-
-    if frame.RegisterUnitEvent then
-        frame:RegisterUnitEvent("UNIT_DISPLAYPOWER", "player")
-        frame:RegisterUnitEvent("UNIT_POWER_UPDATE", "player")
-        frame:RegisterUnitEvent("UNIT_POWER_FREQUENT", "player")
-        frame:RegisterUnitEvent("UNIT_MAXPOWER", "player")
-    else
-        frame:RegisterEvent("UNIT_DISPLAYPOWER")
-        frame:RegisterEvent("UNIT_POWER_UPDATE")
-        frame:RegisterEvent("UNIT_POWER_FREQUENT")
-        frame:RegisterEvent("UNIT_MAXPOWER")
     end
 
-    frame:RegisterEvent("RUNE_POWER_UPDATE")
-    frame:RegisterEvent("RUNE_TYPE_UPDATE")
+    local scripted, scriptDetail = EventFrameCall(
+        frame,
+        "SetScript",
+        "OnEvent",
+        record.callback
+    )
+    if not scripted then
+        record.cleanupPending = true
+        local failure = "CenterBars event callback setup failed: " .. tostring(scriptDetail)
+        local cleaned, cleanupDetail = CleanupEventRecord(record)
+        if not cleaned then
+            AddRetiredEventRecord(owner, record)
+            failure = failure .. "; cleanup: " .. tostring(cleanupDetail)
+        end
+        return nil, failure
+    end
 
-    owner._eventsAttached = true
+    for i = 1, #CENTER_EVENT_REGISTRATIONS do
+        local registered, detail = RegisterEventEdge(frame, CENTER_EVENT_REGISTRATIONS[i])
+        if registered == false then
+            record.registered = true
+            record.cleanupPending = true
+            local failure = "CenterBars event registration failed: " .. tostring(detail)
+            local cleaned, cleanupDetail = CleanupEventRecord(record)
+            if not cleaned then
+                AddRetiredEventRecord(owner, record)
+                failure = failure .. "; cleanup: " .. tostring(cleanupDetail)
+            end
+            return nil, failure
+        end
+    end
+
+    record.registered = true
+    return record
+end
+
+local function PublishEventRecord(owner, record)
+    owner._eventRecord = record
+    owner._eventFrame = record and record.frame or nil
+    owner._eventsAttached = record ~= nil and true or false
+    if record then record.active = true end
+end
+
+local function ReleaseCurrentEventRecord(owner)
+    local record = owner._eventRecord
+    owner._eventRecord = nil
+    owner._eventFrame = nil
+    owner._eventsAttached = false
+    if not record then return true end
+
+    record.active = false
+    local cleaned, detail = CleanupEventRecord(record)
+    if not cleaned then
+        AddRetiredEventRecord(owner, record)
+        return false, detail
+    end
+    return true
+end
+
+local function EnsureEvents(owner)
+    local current = owner._eventRecord
+    if owner._eventsAttached == true
+        and type(current) == "table"
+        and current.active == true
+        and current.registered == true
+        and current.cleanupPending ~= true then
+        return true
+    end
+
+    ReleaseCurrentEventRecord(owner)
+    local retiredOK, retiredDetail = RetryRetiredEventRecords(owner)
+    if retiredOK == false then
+        return false, "CenterBars previous event cleanup failed: " .. tostring(retiredDetail)
+    end
+
+    local record, detail = PrepareEventRecord(owner)
+    if not record then
+        return false, detail
+    end
+
+    PublishEventRecord(owner, record)
     return true
 end
 
 local function DetachEvents(owner)
-    if owner._eventFrame then
-        owner._eventFrame:UnregisterAllEvents()
-        owner._eventFrame:SetScript("OnEvent", nil)
+    ReleaseCurrentEventRecord(owner)
+    local retiredOK, retiredDetail = RetryRetiredEventRecords(owner)
+    if retiredOK == false then
+        return false, "CenterBars event cleanup failed: " .. tostring(retiredDetail)
     end
-    owner._eventsAttached = false
+    return true
 end
 
 function Runtime:Attach(owner)
     local center = GetCenterCfg()
     if center.enabled == false then
-        DetachEvents(owner)
+        local detached, detail = DetachEvents(owner)
+        if detached == false then return false, detail end
         return true
     end
 
@@ -227,14 +409,21 @@ end
 function Runtime:Detach(owner)
     Call("StopRuneTicker", owner)
     local restored, restoreDetail = CallResult("RestoreDefaultClassResources", owner)
+    local eventsDetached, eventDetail = DetachEvents(owner)
 
     if owner.frame then
         owner.frame:Hide()
     end
 
-    DetachEvents(owner)
+    local failures = {}
     if restored == false then
-        return false, "CenterBars native restore failed: " .. tostring(restoreDetail)
+        failures[#failures + 1] = "CenterBars native restore failed: " .. tostring(restoreDetail)
+    end
+    if eventsDetached == false then
+        failures[#failures + 1] = "events: " .. tostring(eventDetail)
+    end
+    if #failures > 0 then
+        return false, table.concat(failures, "; ")
     end
     return true
 end
@@ -340,12 +529,20 @@ function Runtime:ApplyConfig(owner)
     if center.enabled == false then
         Call("StopRuneTicker", owner)
         local restored, restoreDetail = CallResult("RestoreDefaultClassResources", owner)
-        DetachEvents(owner)
+        local eventsDetached, eventDetail = DetachEvents(owner)
         if owner.frame then
             owner.frame:Hide()
         end
+
+        local failures = {}
         if restored == false then
-            return false, "CenterBars native restore failed: " .. tostring(restoreDetail)
+            failures[#failures + 1] = "CenterBars native restore failed: " .. tostring(restoreDetail)
+        end
+        if eventsDetached == false then
+            failures[#failures + 1] = "events: " .. tostring(eventDetail)
+        end
+        if #failures > 0 then
+            return false, table.concat(failures, "; ")
         end
         return true
     end
