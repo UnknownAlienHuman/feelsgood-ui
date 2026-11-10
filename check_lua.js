@@ -158,6 +158,15 @@ try {
     assertSourceExcludes('core/MinimapIcon.lua', /local dragging = false/, 'global minimap drag boolean');
 
     assertSourceIncludes('modules/UnitFramesTarget.lua', 'Target._frameRegistry');
+    assertSourceIncludes('modules/UnitFramesTarget.lua', 'local function BuildFrameObserver(frame, unit)');
+    assertSourceIncludes('modules/UnitFramesTarget.lua', 'current.observer ~= observer');
+    assertSourceIncludes('modules/UnitFramesTarget.lua', 'local function RetryOwnerRetiredFrames(ownerRecord)');
+    assertSourceIncludes('modules/UnitFramesTarget.lua', 'Every desired frame is active before replacing ownerRecord fields.');
+    assertSourceIncludes('modules/UnitFramesTarget.lua', 'previous observer cleanup');
+    assertSourceIncludes('modules/UnitFramesRuntime.lua', 'observers: ');
+    assertSourceExcludes('modules/UnitFramesTarget.lua', /observer:UnregisterAllEvents\(\)/, 'unchecked UnitFrames observer unregister');
+    assertSourceExcludes('modules/UnitFramesTarget.lua', /observer:Register(?:Unit)?Event\(/, 'unchecked UnitFrames observer registration');
+
     assertSourceIncludes('modules/UnitFramesTarget.lua', 'Target._auraRoleRegistry');
     assertSourceIncludes('modules/UnitFramesTarget.lua', 'Target._headerHookRegistry');
     assertSourceIncludes('modules/UnitFramesTarget.lua', 'local attached, detail = Target.AttachOwner(owner)');

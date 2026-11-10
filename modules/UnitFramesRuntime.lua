@@ -176,16 +176,18 @@ local function AttachObservers(owner)
 end
 
 local function DetachObservers(owner)
-    if Target and Target.DetachOwner then
-        Target.DetachOwner(owner)
-    end
     owner._eventsAttached = false
+    if Target and Target.DetachOwner then
+        return Target.DetachOwner(owner)
+    end
+    return true
 end
 
 function Runtime:Attach(owner)
     local cfg = GetUnitFramesCfg()
     if cfg.enabled == false then
-        DetachObservers(owner)
+        local detached, detail = DetachObservers(owner)
+        if detached == false then return false, detail end
         return true
     end
 
@@ -203,8 +205,7 @@ function Runtime:Attach(owner)
 end
 
 function Runtime:Detach(owner)
-    DetachObservers(owner)
-
+    local observersDetached, observerDetail = DetachObservers(owner)
     local watchesDisabled, watchDetail = DisableOptionalUnitWatches(owner)
 
     if owner.player then
@@ -219,8 +220,15 @@ function Runtime:Detach(owner)
 
     owner._configDirty = nil
     owner._auraModeDirty = nil
+    local failures = {}
+    if observersDetached == false then
+        failures[#failures + 1] = "observers: " .. tostring(observerDetail)
+    end
     if watchesDisabled == false then
-        return false, watchDetail
+        failures[#failures + 1] = "unit watches: " .. tostring(watchDetail)
+    end
+    if #failures > 0 then
+        return false, table.concat(failures, "; ")
     end
     return true
 end
@@ -346,7 +354,7 @@ function Runtime:ApplyConfig(owner)
     end
 
     if unitframesCfg.enabled == false then
-        DetachObservers(owner)
+        local observersDetached, observerDetail = DetachObservers(owner)
         local watchesDisabled, watchDetail = DisableOptionalUnitWatches(owner)
 
         if owner.player then
@@ -358,8 +366,16 @@ function Runtime:ApplyConfig(owner)
         if owner.player and owner.player.CombatTime then
             Call("StopCombatTimer", owner.player)
         end
+
+        local failures = {}
+        if observersDetached == false then
+            failures[#failures + 1] = "observers: " .. tostring(observerDetail)
+        end
         if watchesDisabled == false then
-            return false, watchDetail
+            failures[#failures + 1] = "unit watches: " .. tostring(watchDetail)
+        end
+        if #failures > 0 then
+            return false, table.concat(failures, "; ")
         end
         return true
     end

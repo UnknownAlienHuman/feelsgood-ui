@@ -37,6 +37,9 @@ local function GetOwnerRecord(owner, create)
         record = {}
         OwnerRegistry[owner] = record
     end
+    if record and type(record.retiredFrames) ~= "table" then
+        record.retiredFrames = setmetatable({}, { __mode = "k" })
+    end
     return record
 end
 
@@ -604,39 +607,43 @@ local function HookTargetHeaderSignal(frame, element)
     end
 
     local hook = HeaderHookRegistry[element]
-    if not hook then
-        hook = { frame = frame }
+    if type(hook) ~= "table" then
+        hook = {}
         HeaderHookRegistry[element] = hook
-    else
-        hook.frame = frame
     end
 
-    local function RefreshHeader()
-        local current = HeaderHookRegistry[element]
-        local currentFrame = current and current.frame or nil
-        local record = currentFrame and FrameRegistry[currentFrame] or nil
-        if not record or record.active ~= true then
-            return
+    if type(hook.callback) ~= "function" then
+        hook.callback = function(signal)
+            local current = HeaderHookRegistry[signal]
+            local currentFrame = current and current.frame or nil
+            local record = currentFrame and FrameRegistry[currentFrame] or nil
+            if not record or record.active ~= true then
+                return
+            end
+            Target.LayoutTargetHeader(currentFrame)
+            Target.ApplyTargetHeaderTextColor(currentFrame)
         end
-        Target.LayoutTargetHeader(currentFrame)
-        Target.ApplyTargetHeaderTextColor(currentFrame)
     end
 
     if hook.showHooked ~= true then
-        local ok, err = pcall(element.HookScript, element, "OnShow", RefreshHeader)
-        if not ok then
-            return false, "Target header OnShow hook failed: " .. tostring(err)
+        local ok, result = pcall(element.HookScript, element, "OnShow", hook.callback)
+        if not ok or result == false then
+            return false, "Target header OnShow hook failed: " .. tostring(result)
         end
         hook.showHooked = true
     end
 
     if hook.hideHooked ~= true then
-        local ok, err = pcall(element.HookScript, element, "OnHide", RefreshHeader)
-        if not ok then
-            return false, "Target header OnHide hook failed: " .. tostring(err)
+        local ok, result = pcall(element.HookScript, element, "OnHide", hook.callback)
+        if not ok or result == false then
+            return false, "Target header OnHide hook failed: " .. tostring(result)
         end
         hook.hideHooked = true
     end
+
+    -- Publish the target frame only after every mandatory permanent edge is
+    -- installed. A partial hook remains inert and retryable.
+    hook.frame = frame
     return true
 end
 
@@ -683,79 +690,198 @@ local function HandleObservedEvent(frame, owner, event, unit)
     end
 end
 
+local OBSERVED_FIELDS = { "target", "focus", "targettarget" }
+
+local function ObserverCall(observer, method, ...)
+    local fn = observer and observer[method] or nil
+    if type(fn) ~= "function" then
+        return false, tostring(method) .. " is unavailable"
+    end
+
+    local ok, result = pcall(fn, observer, ...)
+    if not ok then
+        return false, tostring(method) .. " failed: " .. tostring(result)
+    end
+    if result == false then
+        return false, tostring(method) .. " rejected the request"
+    end
+    return true
+end
+
+local function CleanupObserver(observer)
+    if not observer then return true end
+
+    local failures = {}
+    local scriptOK, scriptDetail = ObserverCall(observer, "SetScript", "OnEvent", nil)
+    if scriptOK == false then failures[#failures + 1] = scriptDetail end
+    local eventsOK, eventsDetail = ObserverCall(observer, "UnregisterAllEvents")
+    if eventsOK == false then failures[#failures + 1] = eventsDetail end
+
+    if #failures > 0 then
+        return false, table.concat(failures, "; ")
+    end
+    return true
+end
+
+local function AddRetiredObserver(record, observer)
+    if not (record and observer) then return end
+    record.retiredObservers = type(record.retiredObservers) == "table"
+        and record.retiredObservers
+        or {}
+    for i = 1, #record.retiredObservers do
+        if record.retiredObservers[i] == observer then return end
+    end
+    record.retiredObservers[#record.retiredObservers + 1] = observer
+end
+
+local function RetryRetiredObservers(record)
+    local retired = record and record.retiredObservers
+    if type(retired) ~= "table" or #retired == 0 then
+        return true
+    end
+
+    local failures = {}
+    for i = #retired, 1, -1 do
+        local observer = retired[i]
+        local ok, detail = CleanupObserver(observer)
+        if ok then
+            table.remove(retired, i)
+        else
+            failures[#failures + 1] = tostring(detail)
+        end
+    end
+    if #retired == 0 then record.retiredObservers = nil end
+    if #failures > 0 then
+        return false, table.concat(failures, "; ")
+    end
+    return true
+end
+
+local function RegisterObserverEvent(observer, event, unit)
+    if unit ~= nil and type(observer.RegisterUnitEvent) == "function" then
+        local ok, detail = ObserverCall(observer, "RegisterUnitEvent", event, unit)
+        if ok == false then
+            return false, tostring(event) .. " (" .. tostring(unit) .. "): " .. tostring(detail)
+        end
+        return true
+    end
+
+    local ok, detail = ObserverCall(observer, "RegisterEvent", event)
+    if ok == false then
+        return false, tostring(event) .. ": " .. tostring(detail)
+    end
+    return true
+end
+
+local function BuildFrameObserver(frame, unit)
+    local ok, observer = pcall(CreateFrame, "Frame", nil, frame)
+    if not ok or not observer then
+        return nil, "Target observer creation failed: " .. tostring(observer), nil
+    end
+
+    local scriptOK, scriptDetail = ObserverCall(observer, "SetScript", "OnEvent", function(_, event, ...)
+        local current = FrameRegistry[frame]
+        if not current
+            or current.active ~= true
+            or current.observer ~= observer then
+            return
+        end
+        HandleObservedEvent(frame, current.owner, event, ...)
+    end)
+    if scriptOK == false then
+        local cleaned, cleanupDetail = CleanupObserver(observer)
+        local detail = "Target observer OnEvent setup failed: " .. tostring(scriptDetail)
+        if cleaned == false then detail = detail .. "; cleanup: " .. tostring(cleanupDetail) end
+        return nil, detail, cleaned and nil or observer
+    end
+
+    local registrations = {}
+    if unit == "target" then
+        registrations = {
+            { "PLAYER_TARGET_CHANGED" },
+            { "UNIT_NAME_UPDATE", unit },
+            { "UNIT_LEVEL", unit },
+            { "UNIT_CLASSIFICATION_CHANGED", unit },
+            { "UNIT_FACTION", unit },
+            { "UNIT_TARGET", unit },
+        }
+    elseif unit == "focus" then
+        registrations = {
+            { "PLAYER_FOCUS_CHANGED" },
+            { "UNIT_FACTION", unit },
+        }
+    else
+        registrations = {
+            { "UNIT_FACTION", unit },
+        }
+    end
+
+    for i = 1, #registrations do
+        local registration = registrations[i]
+        local registered, detail = RegisterObserverEvent(observer, registration[1], registration[2])
+        if registered == false then
+            local cleaned, cleanupDetail = CleanupObserver(observer)
+            local failure = "Target observer registration failed: " .. tostring(detail)
+            if cleaned == false then failure = failure .. "; cleanup: " .. tostring(cleanupDetail) end
+            return nil, failure, cleaned and nil or observer
+        end
+    end
+
+    return observer
+end
+
 local function AttachFrameSignals(frame, owner)
     if type(frame) ~= "table" then
-        return true
+        return true, nil, false, true
     end
 
     local unit = frame.unit
     if unit ~= "target" and unit ~= "focus" and unit ~= "targettarget" then
-        return true
+        return true, nil, false, true
+    end
+
+    local hooked, hookDetail = HookTargetHeaderAnchorSignals(frame)
+    if hooked == false then
+        return false, hookDetail, false, false
     end
 
     local record = GetFrameRecord(frame, true)
+    local cleanupOK, cleanupDetail = RetryRetiredObservers(record)
+
+    if record.active == true then
+        if record.owner ~= owner or record.unit ~= unit or not record.observer then
+            return false, "UnitFrames observer frame already has a different active owner", false, false
+        end
+        if cleanupOK == false then
+            return false, cleanupDetail, false, true
+        end
+        return true, nil, false, true
+    end
+
+    local observer, detail, staleObserver = BuildFrameObserver(frame, unit)
+    if staleObserver then AddRetiredObserver(record, staleObserver) end
+    if not observer then
+        return false, detail, false, false
+    end
+
+    local previousObserver = record.observer
+    record.observer = observer
     record.owner = owner
+    record.unit = unit
     record.active = true
 
-    if unit == "target" then
-        local hooked, hookDetail = HookTargetHeaderAnchorSignals(frame)
-        if hooked == false then
-            record.active = false
-            record.owner = nil
-            return false, hookDetail
-        end
+    local failures = {}
+    if cleanupOK == false then failures[#failures + 1] = tostring(cleanupDetail) end
+    if previousObserver and previousObserver ~= observer then
+        AddRetiredObserver(record, previousObserver)
+        local retiredOK, retiredDetail = RetryRetiredObservers(record)
+        if retiredOK == false then failures[#failures + 1] = tostring(retiredDetail) end
     end
 
-    local observer = record.observer
-    if not observer then
-        local ok, created = pcall(CreateFrame, "Frame", nil, frame)
-        if not ok or not created then
-            record.active = false
-            record.owner = nil
-            return false, "Target observer creation failed: " .. tostring(created)
-        end
-
-        observer = created
-        record.observer = observer
-        observer:SetScript("OnEvent", function(_, event, ...)
-            local current = FrameRegistry[frame]
-            if not current or current.active ~= true then
-                return
-            end
-            HandleObservedEvent(frame, current.owner, event, ...)
-        end)
+    if #failures > 0 then
+        return false, table.concat(failures, "; "), true, true
     end
-
-    observer:UnregisterAllEvents()
-
-    if unit == "target" then
-        observer:RegisterEvent("PLAYER_TARGET_CHANGED")
-        if observer.RegisterUnitEvent then
-            observer:RegisterUnitEvent("UNIT_NAME_UPDATE", unit)
-            observer:RegisterUnitEvent("UNIT_LEVEL", unit)
-            observer:RegisterUnitEvent("UNIT_CLASSIFICATION_CHANGED", unit)
-            observer:RegisterUnitEvent("UNIT_FACTION", unit)
-            observer:RegisterUnitEvent("UNIT_TARGET", unit)
-        else
-            observer:RegisterEvent("UNIT_NAME_UPDATE")
-            observer:RegisterEvent("UNIT_LEVEL")
-            observer:RegisterEvent("UNIT_CLASSIFICATION_CHANGED")
-            observer:RegisterEvent("UNIT_FACTION")
-            observer:RegisterEvent("UNIT_TARGET")
-        end
-        return true
-    end
-
-    if unit == "focus" then
-        observer:RegisterEvent("PLAYER_FOCUS_CHANGED")
-    end
-
-    if observer.RegisterUnitEvent then
-        observer:RegisterUnitEvent("UNIT_FACTION", unit)
-    else
-        observer:RegisterEvent("UNIT_FACTION")
-    end
-    return true
+    return true, nil, true, true
 end
 
 local function DetachFrameSignals(frame)
@@ -766,9 +892,61 @@ local function DetachFrameSignals(frame)
 
     record.active = false
     record.owner = nil
+    record.unit = nil
+
     local observer = record.observer
-    if observer then
-        observer:UnregisterAllEvents()
+    record.observer = nil
+    if observer then AddRetiredObserver(record, observer) end
+
+    local cleaned, detail = RetryRetiredObservers(record)
+    if cleaned == false then
+        return false, detail
+    end
+    return true
+end
+
+local function GetRetiredFrameSet(ownerRecord)
+    ownerRecord.retiredFrames = type(ownerRecord.retiredFrames) == "table"
+        and ownerRecord.retiredFrames
+        or setmetatable({}, { __mode = "k" })
+    return ownerRecord.retiredFrames
+end
+
+local function MarkRetiredFrame(ownerRecord, frame)
+    if frame then GetRetiredFrameSet(ownerRecord)[frame] = true end
+end
+
+local function RetryOwnerRetiredFrames(ownerRecord)
+    local retired = ownerRecord and ownerRecord.retiredFrames
+    if type(retired) ~= "table" then return true end
+
+    local failures = {}
+    for frame in pairs(retired) do
+        local ok, detail = DetachFrameSignals(frame)
+        if ok then
+            retired[frame] = nil
+        else
+            failures[#failures + 1] = tostring(detail)
+        end
+    end
+    if #failures > 0 then
+        return false, table.concat(failures, "; ")
+    end
+    return true
+end
+
+local function RollbackActivatedFrames(ownerRecord, activated)
+    local failures = {}
+    for i = #activated, 1, -1 do
+        local frame = activated[i]
+        local ok, detail = DetachFrameSignals(frame)
+        if ok == false then
+            MarkRetiredFrame(ownerRecord, frame)
+            failures[#failures + 1] = tostring(detail)
+        end
+    end
+    if #failures > 0 then
+        return false, table.concat(failures, "; ")
     end
     return true
 end
@@ -779,29 +957,63 @@ function Target.AttachOwner(owner)
     end
 
     local ownerRecord = GetOwnerRecord(owner, true)
-    local fields = { "target", "focus", "targettarget" }
-    local attachedFields = {}
-    for i = 1, #fields do
-        local field = fields[i]
-        local current = owner[field]
-        local previous = ownerRecord[field]
-        if previous and previous ~= current then
-            DetachFrameSignals(previous)
-            ownerRecord[field] = nil
-        end
+    local failures = {}
+    local retiredOK, retiredDetail = RetryOwnerRetiredFrames(ownerRecord)
+    if retiredOK == false then failures[#failures + 1] = tostring(retiredDetail) end
 
-        local ok, detail = AttachFrameSignals(current, owner)
-        if ok == false then
-            for j = 1, #attachedFields do
-                local attachedField = attachedFields[j]
-                DetachFrameSignals(ownerRecord[attachedField])
-                ownerRecord[attachedField] = nil
+    local previous = {}
+    local desired = {}
+    local activated = {}
+    local activatedSet = {}
+
+    for i = 1, #OBSERVED_FIELDS do
+        local field = OBSERVED_FIELDS[i]
+        previous[field] = ownerRecord[field]
+        desired[field] = owner[field]
+
+        local ok, detail, changed, ready = AttachFrameSignals(desired[field], owner)
+        if changed and desired[field] and not activatedSet[desired[field]] then
+            activatedSet[desired[field]] = true
+            activated[#activated + 1] = desired[field]
+        end
+        if ready ~= true then
+            local rollbackOK, rollbackDetail = RollbackActivatedFrames(ownerRecord, activated)
+            local failure = tostring(field) .. ": " .. tostring(detail)
+            if rollbackOK == false then
+                failure = failure .. "; rollback cleanup: " .. tostring(rollbackDetail)
             end
-            return false, detail
+            if #failures > 0 then
+                failure = table.concat(failures, "; ") .. "; " .. failure
+            end
+            return false, failure
         end
+        if ok == false then
+            failures[#failures + 1] = tostring(field) .. ": " .. tostring(detail)
+        end
+    end
 
-        ownerRecord[field] = current
-        attachedFields[#attachedFields + 1] = field
+    -- Every desired frame is active before replacing ownerRecord fields.
+    for i = 1, #OBSERVED_FIELDS do
+        local field = OBSERVED_FIELDS[i]
+        ownerRecord[field] = desired[field]
+    end
+
+    for i = 1, #OBSERVED_FIELDS do
+        local field = OBSERVED_FIELDS[i]
+        local oldFrame = previous[field]
+        local newFrame = desired[field]
+        if oldFrame and oldFrame ~= newFrame then
+            local detached, detail = DetachFrameSignals(oldFrame)
+            if detached == false then
+                MarkRetiredFrame(ownerRecord, oldFrame)
+                failures[#failures + 1] = tostring(field)
+                    .. " previous observer cleanup: " .. tostring(detail)
+            end
+        end
+    end
+
+    if #failures > 0 then
+        return false, table.concat(failures, "; ")
     end
     return true
 end
@@ -811,18 +1023,35 @@ function Target.DetachOwner(owner)
         return true
     end
 
-    local ownerRecord = GetOwnerRecord(owner, false)
-    local fields = { "target", "focus", "targettarget" }
-    for i = 1, #fields do
-        local field = fields[i]
-        local recorded = ownerRecord and ownerRecord[field] or nil
+    local ownerRecord = GetOwnerRecord(owner, false) or GetOwnerRecord(owner, true)
+    local frames = {}
+    local retired = GetRetiredFrameSet(ownerRecord)
+
+    for i = 1, #OBSERVED_FIELDS do
+        local field = OBSERVED_FIELDS[i]
+        local recorded = ownerRecord[field]
         local current = owner[field]
-        DetachFrameSignals(recorded)
-        if current ~= recorded then
-            DetachFrameSignals(current)
-        end
-        if ownerRecord then ownerRecord[field] = nil end
+        if recorded then frames[recorded] = true end
+        if current then frames[current] = true end
+        ownerRecord[field] = nil
     end
+    for frame in pairs(retired) do frames[frame] = true end
+
+    local failures = {}
+    for frame in pairs(frames) do
+        local detached, detail = DetachFrameSignals(frame)
+        if detached then
+            retired[frame] = nil
+        else
+            retired[frame] = true
+            failures[#failures + 1] = tostring(detail)
+        end
+    end
+
+    if #failures > 0 then
+        return false, table.concat(failures, "; ")
+    end
+
     OwnerRegistry[owner] = nil
     return true
 end
