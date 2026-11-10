@@ -1,0 +1,84 @@
+name: Refine Companion detach retry
+
+on:
+  push:
+    branches:
+      - codex/companion-runtime-lifecycle
+
+permissions:
+  contents: write
+
+jobs:
+  refine:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Apply detach retry refinement
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .codex/refine_companion_detach_retry.py
+          git diff --check
+
+      - name: Audit retry-owner contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path('modules/CompanionRuntime.lua').read_text()
+          check = Path('check_lua.js').read_text()
+
+          required = [
+              'local function InstallDetachRetryWatcher(module)',
+              'Keep the dedicated detach watcher active',
+              'replacement watcher: ',
+              'Companion retired cleanup failed',
+              'record.cleanupPending = true',
+          ]
+          for needle in required:
+              assert needle in source, f'missing Companion retry contract: {needle}'
+
+          finalize = source.split('FinalizeDetach = function(module)', 1)[1].split('HandleWatcherEvent = function', 1)[0]
+          assert finalize.index('RetryRetiredRegistrations(module)') < finalize.index('ReleaseCurrentWatcherRecord(module)')
+          assert 'InstallDetachRetryWatcher' in check
+          print('Companion detach retry audit passed.')
+          PY
+
+      - name: Install Lua 5.1
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v lua5.1 >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y lua5.1
+          fi
+
+      - name: Run detach retry harness
+        run: lua5.1 .codex/test_companion_detach_retry.lua
+
+      - name: Validate addon
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm test
+
+      - name: Commit validated refinement
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .codex
+          rm -f .github/workflows/refine-companion-detach-retry.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Keep Companion detach cleanup retry-owned" -m "Retain the dedicated post-combat watcher until retired registrations are clean, replace it when self-unregister fails, retain watcher setup cleanup for retry, and let detached callers reconcile unresolved registrations."
+          git push origin HEAD:codex/companion-runtime-lifecycle
