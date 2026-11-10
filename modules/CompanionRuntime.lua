@@ -391,7 +391,14 @@ local function PrepareWatcherRecord(module, events, mode)
         record.callback
     )
     if not scripted or result == false then
-        return nil, "watcher callback setup failed: " .. ErrorText(scriptDetail or result)
+        record.cleanupPending = true
+        local failure = "watcher callback setup failed: " .. ErrorText(scriptDetail or result)
+        local cleaned, cleanupDetail = CleanupWatcherRecord(record)
+        if not cleaned then
+            AddRetiredRecord(module, "_retiredWatcherRecords", record)
+            failure = failure .. "; cleanup: " .. ErrorText(cleanupDetail)
+        end
+        return nil, failure
     end
 
     for i = 1, #events do
@@ -437,6 +444,28 @@ local function ReleaseCurrentWatcherRecord(module)
         AddRetiredRecord(module, "_retiredWatcherRecords", record)
         return false, detail
     end
+    return true
+end
+
+local function InstallDetachRetryWatcher(module)
+    local watcher, detail = PrepareWatcherRecord(
+        module,
+        DETACH_WATCHER_EVENTS,
+        "detach"
+    )
+    if not watcher then
+        module._pendingDetachRestore = true
+        module._eventsAttached = false
+        module._detached = true
+        module._detaching = nil
+        return false, detail
+    end
+
+    PublishWatcherRecord(module, watcher)
+    module._pendingDetachRestore = true
+    module._eventsAttached = false
+    module._detached = true
+    module._detaching = nil
     return true
 end
 
@@ -499,11 +528,23 @@ FinalizeDetach = function(module)
         return false, restoreDetail
     end
 
-    local failures = {}
-    local watcherOK, watcherDetail = ReleaseCurrentWatcherRecord(module)
-    if not watcherOK then AppendFailure(failures, "detach watcher", watcherDetail) end
+    -- Keep the dedicated detach watcher active while older callback/watcher
+    -- generations are still unresolved. It is the automatic retry owner.
     local retiredOK, retiredDetail = RetryRetiredRegistrations(module)
-    if not retiredOK then AppendFailure(failures, "retired registrations", retiredDetail) end
+    if not retiredOK then
+        module._pendingDetachRestore = true
+        return false, "retired registrations: " .. ErrorText(retiredDetail)
+    end
+
+    local watcherOK, watcherDetail = ReleaseCurrentWatcherRecord(module)
+    if not watcherOK then
+        local retryOK, retryDetail = InstallDetachRetryWatcher(module)
+        local detail = "detach watcher: " .. ErrorText(watcherDetail)
+        if not retryOK then
+            detail = detail .. "; replacement watcher: " .. ErrorText(retryDetail)
+        end
+        return false, detail
+    end
 
     module._pendingAfterCombat = nil
     module._pendingPetButtons = nil
@@ -512,9 +553,7 @@ FinalizeDetach = function(module)
     module._eventsAttached = false
     module._detaching = nil
     module._detached = true
-
-    local detail = JoinFailures(failures)
-    if detail then return false, detail end
+    ClearRuntimeFailure(module, "_detachLastError")
     return true
 end
 
@@ -787,6 +826,11 @@ function Runtime.Detach(module)
         if module._pendingDetachRestore and not Shared:IsInCombat() then
             return FinalizeDetach(module)
         end
+
+        local retiredOK, retiredDetail = RetryRetiredRegistrations(module)
+        if not retiredOK then
+            return false, "Companion retired cleanup failed: " .. ErrorText(retiredDetail)
+        end
         return true
     end
 
@@ -804,21 +848,11 @@ function Runtime.Detach(module)
     if not watcherReleased then AppendFailure(failures, "watcher", watcherDetail) end
 
     if Shared:IsInCombat() then
-        local detachWatcher, detachWatcherDetail = PrepareWatcherRecord(
-            module,
-            DETACH_WATCHER_EVENTS,
-            "detach"
-        )
-        if not detachWatcher then
-            AppendFailure(failures, "detach watcher", detachWatcherDetail)
+        local watcherInstalled, watcherDetail = InstallDetachRetryWatcher(module)
+        if not watcherInstalled then
+            AppendFailure(failures, "detach watcher", watcherDetail)
             return false, JoinFailures(failures)
         end
-
-        PublishWatcherRecord(module, detachWatcher)
-        module._pendingDetachRestore = true
-        module._eventsAttached = false
-        module._detached = true
-        module._detaching = nil
 
         local detail = JoinFailures(failures)
         if detail then

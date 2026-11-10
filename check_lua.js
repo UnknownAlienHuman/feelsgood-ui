@@ -261,6 +261,9 @@ try {
     assertSourceIncludes('modules/CompanionRuntime.lua', 'Runtime._nextExpandRecordID');
     assertSourceIncludes('modules/CompanionRuntime.lua', 'module._expandCallbackRecord ~= record');
     assertSourceIncludes('modules/CompanionRuntime.lua', 'local function PrepareWatcherRecord(module, events, mode)');
+    assertSourceIncludes('modules/CompanionRuntime.lua', 'local function InstallDetachRetryWatcher(module)');
+    assertSourceIncludes('modules/CompanionRuntime.lua', 'Keep the dedicated detach watcher active');
+    assertSourceIncludes('modules/CompanionRuntime.lua', 'replacement watcher: ');
     assertSourceIncludes('modules/CompanionRuntime.lua', 'module._watcherRecord ~= record or record.active ~= true');
     assertSourceIncludes('modules/CompanionRuntime.lua', 'callback unregister failed');
     assertSourceIncludes('modules/CompanionRuntime.lua', 'Companion restore deferred until combat ends');
