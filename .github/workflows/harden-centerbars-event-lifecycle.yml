@@ -24,6 +24,7 @@ jobs:
         run: |
           set -euo pipefail
           python .codex/harden_centerbars_event_lifecycle.py
+          python .codex/refine_centerbars_event_failure_labels.py
           python .codex/update_centerbars_event_docs.py
           git diff --check
 
@@ -45,6 +46,7 @@ jobs:
               'CenterBars event callback setup failed',
               'CenterBars previous event cleanup failed',
               'CenterBars event cleanup failed',
+              'CenterBars native restore failed',
               'local record, detail = PrepareEventRecord(owner)',
           ]
           for needle in required:
